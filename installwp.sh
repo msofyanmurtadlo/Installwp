@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Meminta input untuk domain, nama database, dan path instalasi
 echo "Masukkan nama domain (contoh: namadomain.com):"
 read domain
 
@@ -13,34 +12,26 @@ read dbuser
 echo "Masukkan password database:"
 read -s dbpass
 
-# Step 1 - Memastikan UFW aktif
-ufw enable
+if ! ufw status | grep -q "Status: active"; then
+    ufw enable
+fi
 
-# Step 2 - Mengizinkan SSH
 ufw allow ssh
 
-# Step 3 - Memperbarui sistem
 sudo apt update && sudo apt upgrade -y
 
-# Step 4 - Instalasi Nginx
 sudo apt install nginx -y
 
-# Step 5 - Mengizinkan Nginx di firewall
 sudo ufw allow 'Nginx Full'
 
-# Step 6 - Instalasi dependensi untuk PHP
 sudo apt install -y lsb-release gnupg2 ca-certificates apt-transport-https software-properties-common
 
-# Step 7 - Menambahkan repository PHP
 sudo add-apt-repository ppa:ondrej/php
 
-# Step 8 - Instalasi PHP 8.3 dan ekstensi yang diperlukan
 sudo apt install -y php8.3 php8.3-fpm php8.3-bcmath php8.3-xml php8.3-mysql php8.3-zip php8.3-intl php8.3-ldap php8.3-gd php8.3-cli php8.3-bz2 php8.3-curl php8.3-mbstring php8.3-imagick php8.3-tokenizer php8.3-opcache php8.3-redis php8.3-cgi
 
-# Step 9 - Instalasi MariaDB
 sudo apt install -y mariadb-server mariadb-client
 
-# Step 10 - Mengonfigurasi Database
 sudo mariadb <<EOF
 CREATE DATABASE ${dbname};
 CREATE USER ${dbuser}@localhost IDENTIFIED BY '${dbpass}';
@@ -49,19 +40,15 @@ FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-# Step 11 - Memastikan path WordPress
-# Periksa apakah direktori utama WordPress sudah ada
 if [ -d "/var/www/website1" ]; then
     echo "/var/www/website1 sudah ada."
     echo "Silakan masukkan nama folder baru untuk instalasi WordPress, misalnya website2:"
     read path
     path="/var/www/$path"
 else
-    # Jika belum ada, set path ke /var/www/wordpress
     path="/var/www/website1"
 fi
 
-# Memastikan path yang dimasukkan benar
 if [ ! -d "$path" ]; then
     sudo mkdir -p $path
     echo "Direktori $path berhasil dibuat."
@@ -69,7 +56,6 @@ else
     echo "Direktori $path sudah ada."
 fi
 
-# Step 12 - Membuat direktori untuk WordPress dan menginstal WordPress
 cd $path
 sudo apt install wget
 wget http://wordpress.org/latest.tar.gz
@@ -78,7 +64,6 @@ rm -r latest.tar.gz
 sudo chown -R www-data:www-data $path/wordpress/
 sudo chmod -R 755 $path/wordpress/
 
-# Step 13 - Konfigurasi Nginx untuk WordPress dengan path yang benar
 sudo tee /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
 server {
     listen 80;
@@ -159,17 +144,12 @@ server {
 }
 EOF
 
-# Step 14 - Menyambungkan konfigurasi Nginx ke direktori sites-enabled
 sudo ln -s /etc/nginx/sites-available/${domain}.conf /etc/nginx/sites-enabled/
 
-# Step 15 - Instalasi Certbot untuk SSL
 sudo apt install -y certbot python3-certbot-nginx
 
-# Step 16 - Memasang SSL menggunakan Certbot
 sudo certbot --nginx --agree-tos --redirect --email admin@${domain} -d ${domain},www.${domain}
 
-# Step 17 - Memuat ulang Nginx
 sudo systemctl reload nginx
 
-# Menyelesaikan
 echo "Instalasi selesai! Anda dapat mengakses WordPress melalui https://${domain}."
