@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Meminta input untuk domain dan nama database
+# Meminta input untuk domain, nama database, dan path instalasi
 echo "Masukkan nama domain (contoh: namadomain.com):"
 read domain
 
@@ -49,21 +49,41 @@ FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-# Step 11 - Menginstal WordPress
-cd /var/www/
+# Step 11 - Memastikan path WordPress
+# Periksa apakah direktori utama WordPress sudah ada
+if [ -d "/var/www/website1" ]; then
+    echo "/var/www/website1 sudah ada."
+    echo "Silakan masukkan nama folder baru untuk instalasi WordPress, misalnya website2:"
+    read path
+    path="/var/www/$path"
+else
+    # Jika belum ada, set path ke /var/www/wordpress
+    path="/var/www/website1"
+fi
+
+# Memastikan path yang dimasukkan benar
+if [ ! -d "$path" ]; then
+    sudo mkdir -p $path
+    echo "Direktori $path berhasil dibuat."
+else
+    echo "Direktori $path sudah ada."
+fi
+
+# Step 12 - Membuat direktori untuk WordPress dan menginstal WordPress
+cd $path
 sudo apt install wget
 wget http://wordpress.org/latest.tar.gz
 sudo tar -xzvf latest.tar.gz
 rm -r latest.tar.gz
-sudo chown -R www-data:www-data /var/www/wordpress/
-sudo chmod -R 755 /var/www/wordpress/
+sudo chown -R www-data:www-data $path/wordpress/
+sudo chmod -R 755 $path/wordpress/
 
-# Step 12 - Konfigurasi Nginx untuk WordPress
-sudo tee /etc/nginx/sites-available/wordpress.conf > /dev/null <<EOF
+# Step 13 - Konfigurasi Nginx untuk WordPress dengan path yang benar
+sudo tee /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
 server {
     listen 80;
     server_name ${domain} www.${domain};
-    root /var/www/wordpress;
+    root ${path}/wordpress;
     index index.php;
     autoindex off;
     access_log /var/log/nginx/${domain}-access.log combined;
@@ -139,16 +159,16 @@ server {
 }
 EOF
 
-# Step 13 - Menyambungkan konfigurasi Nginx ke direktori sites-enabled
-sudo ln -s /etc/nginx/sites-available/wordpress.conf /etc/nginx/sites-enabled/
+# Step 14 - Menyambungkan konfigurasi Nginx ke direktori sites-enabled
+sudo ln -s /etc/nginx/sites-available/${domain}.conf /etc/nginx/sites-enabled/
 
-# Step 14 - Instalasi Certbot untuk SSL
+# Step 15 - Instalasi Certbot untuk SSL
 sudo apt install -y certbot python3-certbot-nginx
 
-# Step 15 - Memasang SSL menggunakan Certbot
+# Step 16 - Memasang SSL menggunakan Certbot
 sudo certbot --nginx --agree-tos --redirect --email admin@${domain} -d ${domain},www.${domain}
 
-# Step 16 - Memuat ulang Nginx
+# Step 17 - Memuat ulang Nginx
 sudo systemctl reload nginx
 
 # Menyelesaikan
