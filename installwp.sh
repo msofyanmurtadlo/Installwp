@@ -36,6 +36,7 @@ sudo mariadb <<EOF
 CREATE DATABASE ${dbname};
 CREATE USER ${dbuser}@localhost IDENTIFIED BY '${dbpass}';
 GRANT ALL PRIVILEGES ON ${dbname}.* TO ${dbuser}@localhost;
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${dbpass}';  
 FLUSH PRIVILEGES;
 EXIT;
 EOF
