@@ -1,83 +1,73 @@
 #!/bin/bash
 
-# Meminta input untuk domain, user database dan password
-echo "Masukkan nama domain (misalnya: namadomain.com): "
-read DOMAIN
+# Meminta input untuk domain dan nama database
+echo "Masukkan nama domain (contoh: namadomain.com):"
+read domain
 
-echo "Masukkan nama database: "
-read DBNAME
+echo "Masukkan nama database (contoh: wordpress_db):"
+read dbname
 
-echo "Masukkan username database: "
-read DBUSER
+echo "Masukkan username database (contoh: wordpressuser):"
+read dbuser
 
-echo "Masukkan password database: "
-read DBPASS
+echo "Masukkan password database:"
+read -s dbpass
 
-# Step 1: Enable UFW (Firewall)
+# Step 1 - Memastikan UFW aktif
 ufw enable
 
-# Step 2: Allow SSH connections
+# Step 2 - Mengizinkan SSH
 ufw allow ssh
 
-# Step 3: Update your system
+# Step 3 - Memperbarui sistem
 sudo apt update && sudo apt upgrade -y
 
-# Step 4: Install Nginx
+# Step 4 - Instalasi Nginx
 sudo apt install nginx -y
 
-# Step 5: Allow Nginx traffic through firewall
+# Step 5 - Mengizinkan Nginx di firewall
 sudo ufw allow 'Nginx Full'
 
-# Step 6: Install dependencies for PHP
+# Step 6 - Instalasi dependensi untuk PHP
 sudo apt install -y lsb-release gnupg2 ca-certificates apt-transport-https software-properties-common
 
-# Step 7: Add PHP repository
+# Step 7 - Menambahkan repository PHP
 sudo add-apt-repository ppa:ondrej/php
 
-# Step 8: Install PHP 8.3 and necessary PHP extensions
+# Step 8 - Instalasi PHP 8.3 dan ekstensi yang diperlukan
 sudo apt install -y php8.3 php8.3-fpm php8.3-bcmath php8.3-xml php8.3-mysql php8.3-zip php8.3-intl php8.3-ldap php8.3-gd php8.3-cli php8.3-bz2 php8.3-curl php8.3-mbstring php8.3-imagick php8.3-tokenizer php8.3-opcache php8.3-redis php8.3-cgi
 
-# Step 9: Install MariaDB server
+# Step 9 - Instalasi MariaDB
 sudo apt install -y mariadb-server mariadb-client
 
-# Step 10: Login to MariaDB
+# Step 10 - Mengonfigurasi Database
 sudo mariadb <<EOF
-CREATE DATABASE $DBNAME;
-CREATE USER $DBUSER@localhost IDENTIFIED BY '$DBPASS';
-GRANT ALL PRIVILEGES ON $DBNAME.* TO $DBUSER@localhost;
+CREATE DATABASE ${dbname};
+CREATE USER ${dbuser}@localhost IDENTIFIED BY '${dbpass}';
+GRANT ALL PRIVILEGES ON ${dbname}.* TO ${dbuser}@localhost;
 FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-# Step 11: Go to your web server's root directory
+# Step 11 - Menginstal WordPress
 cd /var/www/
-
-# Step 12: Download WordPress
-sudo apt install wget && wget http://wordpress.org/latest.tar.gz
-
-# Step 13: Extract WordPress
+sudo apt install wget
+wget http://wordpress.org/latest.tar.gz
 sudo tar -xzvf latest.tar.gz
-
-# Step 14: Clean up tarball
 rm -r latest.tar.gz
-
-# Step 15: Set correct ownership for WordPress files
 sudo chown -R www-data:www-data /var/www/wordpress/
-
-# Step 16: Set proper file permissions
 sudo chmod -R 755 /var/www/wordpress/
 
-# Step 17: Create Nginx configuration file for WordPress
-sudo bash -c "cat > /etc/nginx/sites-available/wordpress.conf <<EOF
+# Step 12 - Konfigurasi Nginx untuk WordPress
+sudo tee /etc/nginx/sites-available/wordpress.conf > /dev/null <<EOF
 server {
     listen 80;
-    server_name $DOMAIN www.$DOMAIN;
+    server_name ${domain} www.${domain};
     root /var/www/wordpress;
     index index.php;
     autoindex off;
-    access_log /var/log/nginx/$DOMAIN-access.log combined;
-    error_log /var/log/nginx/$DOMAIN-error.log;
-    
+    access_log /var/log/nginx/${domain}-access.log combined;
+    error_log /var/log/nginx/${domain}-error.log;
     client_max_body_size 10M;
     client_body_buffer_size 128k;
     client_body_timeout 10;
@@ -88,7 +78,15 @@ server {
         try_files \$uri \$uri/ /index.php?\$args;
     }
 
-    location ~ \\.php\$ {
+    location ~* /(?:wp-content/uploads|wp-includes)/.*\.php$ {
+        deny all;
+    }
+
+    location = /xmlrpc.php {
+        deny all;
+    }
+
+    location ~ \.php$ {
         try_files \$uri =404;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
@@ -110,23 +108,48 @@ server {
     location ~ /\. {
         deny all;
     }
-}
-EOF"
 
-# Step 18: Enable the WordPress site by creating a symbolic link
+    location /wp-content/uploads/ {
+        location ~ \.php$ {
+            deny all;
+        }
+    }
+
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Permitted-Cross-Domain-Policies none;
+    add_header X-Frame-Options "SAMEORIGIN";
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1000;
+    gzip_comp_level 5;
+    gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
+    gzip_proxied any;
+
+    location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
+        access_log off;
+        log_not_found off;
+        expires 360d;
+    }
+
+    location ~ ^/wp-json/ {
+        rewrite ^/wp-json/(.*?)$ /?rest_route=/$1 last;
+    }
+}
+EOF
+
+# Step 13 - Menyambungkan konfigurasi Nginx ke direktori sites-enabled
 sudo ln -s /etc/nginx/sites-available/wordpress.conf /etc/nginx/sites-enabled/
 
-# Step 19: Install Certbot and Nginx plugin for SSL
+# Step 14 - Instalasi Certbot untuk SSL
 sudo apt install -y certbot python3-certbot-nginx
 
-# Step 20: Obtain an SSL certificate using Certbot
-sudo certbot --nginx --agree-tos --redirect --email admin@$DOMAIN -d $DOMAIN,www.$DOMAIN
+# Step 15 - Memasang SSL menggunakan Certbot
+sudo certbot --nginx --agree-tos --redirect --email admin@${domain} -d ${domain},www.${domain}
 
-# Step 21: Test the Nginx configuration for errors
-sudo nginx -t
-
-# Step 22: Reload Nginx to apply the SSL and configuration changes
+# Step 16 - Memuat ulang Nginx
 sudo systemctl reload nginx
 
-# Optional Step 23: Clean up temporary files (if needed)
-sudo apt autoremove -y
+# Menyelesaikan
+echo "Instalasi selesai! Anda dapat mengakses WordPress melalui https://${domain}."
