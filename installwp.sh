@@ -13,12 +13,13 @@ sudo apt install -y php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql
 
 echo "Enter your domain (e.g. example.com):"
 read domain
+echo "Enter the name of your database:"
+read dbname
 echo "Enter your database username:"
 read dbuser
 echo "Enter your database password:"
 read dbpass
-echo "Enter the name of your database:"
-read dbname
+
 
 sudo mariadb <<EOF
 CREATE DATABASE ${dbname};
@@ -114,19 +115,9 @@ sudo nano /etc/ssl/${domain}/key.pem
 sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
 sudo chmod 755 /var/www/${domain}/wordpress/wp-content
 
-sudo tee -a /etc/nginx/nginx.conf <<EOF
-http {
-    limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;
-    limit_conn_zone \$binary_remote_addr zone=addr:10m;
-    client_body_timeout 10s;
-    client_header_timeout 10s;
-    send_timeout 10s;
-}
-EOF
+sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;\n\ \ \ \ limit_conn_zone \$binary_remote_addr zone=addr:10m;\n\ \ \ \ client_body_timeout 10s;\n\ \ \ \ client_header_timeout 10s;\n\ \ \ \ send_timeout 10s;' /etc/nginx/nginx.conf
 
 sudo systemctl restart nginx
-
-sudo systemctl status nginx
 
 curl -I http://www.${domain}
 
