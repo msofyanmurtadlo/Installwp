@@ -1,129 +1,168 @@
 #!/bin/bash
 
-# Input dari user
-read -p "Masukkan domain (contoh: example.com): " DOMAIN
-read -p "Masukkan nama database: " DBNAME
-read -p "Masukkan nama pengguna database: " DBUSER
-read -p "Masukkan kata sandi database dan root MariaDB: " DBPASS
+# Step 1 - Enable UFW
+ufw enable
 
-# Pembaruan sistem
-sudo apt update -y
-sudo apt upgrade -y
+# Step 2 - Allow SSH
+ufw allow ssh
 
-# Menginstal dependensi yang diperlukan
-sudo apt install -y \
-    nginx \
-    mariadb-server \
-    curl \
-    git \
-    unzip \
-    sudo \
-    gnupg2 \
-    lsb-release \
-    ca-certificates \
-    python3-certbot-nginx \
-    certbot
+# Step 3 - Install Nginx
+sudo apt install nginx -y
 
-# Instal PHP 8.4 dan dependensinya
+# Step 4 - Allow Nginx Full
+sudo ufw allow 'Nginx Full'
+
+# Step 5 - Install Software Properties
+sudo apt-get install software-properties-common -y
+
+# Step 6 - Install PHP 8.4 and necessary PHP extensions
 sudo add-apt-repository ppa:ondrej/php -y
-sudo apt update -y
-sudo apt install -y \
-    php8.4-cli \
-    php8.4-mysql \
-    php8.4-curl \
-    php8.4-json \
-    php8.4-xml \
-    php8.4-mbstring \
-    php8.4-zip
+sudo apt update
+sudo apt install php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath -y
 
-# Install FrankenPHP
-curl -sSL https://github.com/frankenphp/frankenphp/releases/download/v0.1.0/frankenphp-linux-amd64-v0.1.0.tar.gz -o /tmp/frankenphp.tar.gz
-sudo tar -zxvf /tmp/frankenphp.tar.gz -C /usr/local/bin
-sudo chmod +x /usr/local/bin/frankenphp
+# Step 7 - Install MariaDB Server and Client
+sudo apt-get update
+sudo apt-get install mariadb-server mariadb-client -y
 
-# Konfigurasi Nginx untuk FrankenPHP
-sudo cp /etc/nginx/sites-available/default /etc/nginx/sites-available/$DOMAIN
-sudo bash -c "cat > /etc/nginx/sites-available/$DOMAIN" <<EOL
-server {
-    listen 80;
-    server_name $DOMAIN;
-    
-    root /var/www/$DOMAIN;
-    index index.php index.html index.htm;
-    
-    location / {
-        try_files \$uri \$uri/ =404;
-    }
+# Step 8 - Ask user for database details
+echo "Enter your domain (e.g. example.com):"
+read domain
 
-    # Passthrough untuk FrankenPHP
-    location ~ \.php\$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/var/run/frankenphp.sock;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        include fastcgi_params;
-    }
-    
-    location ~ /\.ht {
-        deny all;
-    }
-}
-EOL
+echo "Enter your database username:"
+read dbuser
 
-# Aktifkan situs Nginx
-sudo ln -s /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl restart nginx
+echo "Enter your database password:"
+read dbpass
 
-# Install dan konfigurasikan MariaDB
-sudo systemctl start mariadb
-sudo systemctl enable mariadb
+echo "Enter the name of your database:"
+read dbname
 
-# Mengamankan instalasi MariaDB dan mengatur password root dengan DBPASS
-sudo mysql_secure_installation <<EOF
-y
-$DBPASS
-$DBPASS
-y
-y
-y
-y
-EOF
-
-# Membuat database dan user untuk WordPress
+# Step 9 - Create user and database with provided inputs using MariaDB SQL script
 sudo mariadb <<EOF
-CREATE DATABASE $DBNAME;
-CREATE USER '$DBUSER'@'localhost' IDENTIFIED BY '$DBPASS';
-GRANT ALL PRIVILEGES ON $DBNAME.* TO '$DBUSER'@'localhost';
+CREATE DATABASE ${dbname};
+CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
+GRANT ALL PRIVILEGES ON ${dbname}.* TO '${dbuser}'@'localhost';
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${dbpass}';
 FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-# Install WordPress
-cd /var/www/
-sudo wget https://wordpress.org/latest.tar.gz
-sudo tar -xvzf latest.tar.gz
-sudo mv wordpress $DOMAIN
-sudo chown -R www-data:www-data /var/www/$DOMAIN
+# Step 10 - Create WordPress directory
+mkdir /var/www/${domain}
 
-# Konfigurasi WordPress
-cd /var/www/$DOMAIN
-sudo cp wp-config-sample.php wp-config.php
-sudo sed -i "s/database_name_here/$DBNAME/" wp-config.php
-sudo sed -i "s/username_here/$DBUSER/" wp-config.php
-sudo sed -i "s/password_here/$DBPASS/" wp-config.php
-sudo sed -i "s/localhost/127.0.0.1/" wp-config.php
+# Step 11 - Navigate to the directory
+cd /var/www/${domain}
 
-# Install dan mengonfigurasi SSL dengan Let's Encrypt
-sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email youremail@example.com
+# Step 12 - Download and unzip WordPress
+wget https://wordpress.org/latest.zip
+apt install unzip -y
+unzip latest.zip
+rm -r latest.zip
 
-# Restart Nginx untuk memastikan semua konfigurasi diterapkan
-sudo systemctl restart nginx
+# Step 13 - Configure Nginx for the new domain
+sudo tee /etc/nginx/sites-enabled/${domain} <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name www.${domain} ${domain};
+    root /var/www/${domain}/wordpress/;
+    index index.php index.html index.htm index.nginx-debian.html;
 
-# Restart FrankenPHP
-sudo systemctl restart frankenphp
+    error_log /var/log/nginx/${domain}.error;
+    access_log /var/log/nginx/${domain}.access;
 
-# Memberikan izin folder dan file
-sudo chown -R www-data:www-data /var/www/$DOMAIN
+    location / {
+        limit_req zone=mylimit burst=20 nodelay;
+        limit_conn addr 10;
+        try_files \$uri \$uri/ /index.php;
+    }
 
-# Menyelesaikan instalasi WordPress melalui browser
-echo "Instalasi selesai! Silakan buka https://$DOMAIN untuk melanjutkan pengaturan WordPress."
+    location ~ ^/wp-json/ {
+        rewrite ^/wp-json/(.*?)$ /?rest_route=/$1 last;
+    }
+
+    location ~* /wp-sitemap.*\.xml {
+        try_files \$uri \$uri/ /index.php\$is_args\$args;
+    }
+
+    error_page 404 /404.html;
+    error_page 500 502 503 504 /50x.html;
+
+    client_max_body_size 20M;
+
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+        include snippets/fastcgi-php.conf;
+        fastcgi_buffers 1024 4k;
+        fastcgi_buffer_size 128k;
+    }
+
+    # Enable gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1000;
+    gzip_comp_level 5;
+    gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
+    gzip_proxied any;
+
+    # A long browser cache lifetime can speed up repeat visits to your page
+    location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
+        access_log off;
+        log_not_found off;
+        expires 360d;
+    }
+
+    # Disable access to hidden files
+    location ~ /\.ht {
+        access_log off;
+        log_not_found off;
+        deny all;
+    }
+}
+EOF
+
+# Step 14 - SSL Configuration (if using SSL)
+echo "You can now edit your SSL certificate and key using nano."
+echo "Please make sure to copy your certificate to /etc/ssl/${domain}/cert.pem"
+echo "and your private key to /etc/ssl/${domain}/key.pem"
+echo "Press any key to continue when you are ready."
+
+# Pause to allow user to edit SSL certificate and key
+read -n 1 -s -r -p "Press any key to continue..."
+
+# Open certificate and key files in nano
+sudo nano /etc/ssl/${domain}/cert.pem
+sudo nano /etc/ssl/${domain}/key.pem
+
+# Step 15 - Apply SSL configuration in Nginx
+sudo tee -a /etc/nginx/sites-enabled/${domain} <<EOF
+# SSL configuration
+listen 443 ssl http2;
+listen [::]:443 ssl http2;
+ssl_certificate         /etc/ssl/${domain}/cert.pem;
+ssl_certificate_key     /etc/ssl/${domain}/key.pem;
+EOF
+
+# Step 16 - Set Permissions
+sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
+sudo chmod 755 /var/www/${domain}/wordpress/wp-content
+
+# Step 17 - Remove keepalive_timeout setting in Nginx config (default removed)
+sudo tee -a /etc/nginx/nginx.conf <<EOF
+limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;
+limit_conn_zone \$binary_remote_addr zone=addr:10m;
+client_body_timeout   10s;
+client_header_timeout 10s;
+send_timeout          10s;
+EOF
+
+# Step 18 - Restart Nginx to apply changes
+sudo service nginx restart
+
+echo "WordPress installation completed with PHP 8.4, MariaDB configured, Nginx set up, and SSL certificates applied!"
