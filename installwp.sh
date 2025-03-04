@@ -1,8 +1,11 @@
 #!/bin/bash
 
-# Function to install a package silently and only show success
-install_silently() {
-    sudo apt install -y "$1" &>/dev/null && echo -e "\e[1;32m$1 installed successfully.\e[0m"
+# Function to install a package silently and show progress bar
+install_with_progress() {
+    echo "Installing $1..."
+    sudo apt install -y "$1" &>/dev/null &
+    progress_bar
+    echo -e "\e[1;32m$1 installed successfully.\e[0m"
 }
 
 # Function to show a progress bar for installation
@@ -10,14 +13,13 @@ progress_bar() {
     local pid=$!
     local delay=0.1
     local spinstr='|/-\\'
-    local temp
-    while true; do
-        temp="${spinstr#?}"
-        printf " [%c]  " "$spinstr"
-        spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        kill -0 "$pid" 2>/dev/null || break
-        printf "\b\b\b\b\b\b"
+    while kill -0 "$pid" 2>/dev/null; do
+        for i in {1..10}; do
+            printf " [%c]  " "$spinstr"
+            spinstr=${spinstr#?}${spinstr%"${spinstr#?}"}
+            sleep $delay
+            printf "\b\b\b\b\b\b"
+        done
     done
     echo " Done!"
 }
@@ -26,18 +28,18 @@ progress_bar() {
 echo -e "\n\e[1;32mStarting WordPress Installation...\e[0m\n"
 
 # Enable firewall and allow SSH
+echo "Configuring UFW (Firewall)..."
 ufw enable -y &>/dev/null
 ufw allow ssh &>/dev/null
 
 # Install Fail2Ban
-echo "Installing Fail2Ban..."
-install_silently fail2ban
+install_with_progress fail2ban
 
 # Enable and start Fail2Ban
 sudo systemctl enable fail2ban &>/dev/null
 sudo systemctl start fail2ban &>/dev/null
 
-# Install and configure Fail2Ban for SSH
+# Configure Fail2Ban for SSH
 echo "Configuring Fail2Ban for SSH..."
 sudo tee /etc/fail2ban/jail.d/defaults-debian.conf &>/dev/null <<EOF
 [sshd]
@@ -49,7 +51,7 @@ bantime = 600
 findtime = 600
 EOF
 
-# Install packages for WordPress protection
+# Install Fail2Ban protection for WordPress
 echo "Configuring Fail2Ban for WordPress..."
 sudo tee /etc/fail2ban/jail.d/wordpress.conf &>/dev/null <<EOF
 [wordpress]
@@ -62,49 +64,47 @@ bantime = 600
 findtime = 600
 EOF
 
-# Configure Fail2Ban filter for WordPress
-echo "Creating Fail2Ban filter for WordPress..."
+# Create Fail2Ban filter for WordPress
 sudo tee /etc/fail2ban/filter.d/wordpress.conf &>/dev/null <<EOF
 [Definition]
 failregex = <HOST> -.*"(GET|POST).*wp-login.php
 ignoreregex =
 EOF
 
-# Reload Fail2Ban to apply the new configuration
+# Reload Fail2Ban
 echo "Reloading Fail2Ban..."
 sudo systemctl reload fail2ban &>/dev/null
 
-# Update packages and install required software
-echo "Installing required software..."
+# Update packages
+echo "Updating package lists..."
 sudo apt update &>/dev/null
-install_silently nginx
-install_silently software-properties-common
-install_silently unzip
-install_silently mariadb-server
-install_silently mariadb-client
+
+# Install necessary software packages with progress bar
+install_with_progress nginx
+install_with_progress software-properties-common
+install_with_progress unzip
+install_with_progress mariadb-server
+install_with_progress mariadb-client
 ufw allow 'Nginx Full' &>/dev/null
 
-# Install PHP 8.1
-echo "Installing PHP 8.1..."
-sudo add-apt-repository ppa:ondrej/php -y &>/dev/null
-sudo apt update &>/dev/null
-install_silently php8.1-fpm
-install_silently php8.1-common
-install_silently php8.1-dom
-install_silently php8.1-intl
-install_silently php8.1-mysql
-install_silently php8.1-xml
-install_silently php8.1-xmlrpc
-install_silently php8.1-curl
-install_silently php8.1-gd
-install_silently php8.1-imagick
-install_silently php8.1-cli
-install_silently php8.1-dev
-install_silently php8.1-imap
-install_silently php8.1-mbstring
-install_silently php8.1-soap
-install_silently php8.1-zip
-install_silently php8.1-bcmath
+# Install PHP 8.1 and required extensions
+install_with_progress php8.1-fpm
+install_with_progress php8.1-common
+install_with_progress php8.1-dom
+install_with_progress php8.1-intl
+install_with_progress php8.1-mysql
+install_with_progress php8.1-xml
+install_with_progress php8.1-xmlrpc
+install_with_progress php8.1-curl
+install_with_progress php8.1-gd
+install_with_progress php8.1-imagick
+install_with_progress php8.1-cli
+install_with_progress php8.1-dev
+install_with_progress php8.1-imap
+install_with_progress php8.1-mbstring
+install_with_progress php8.1-soap
+install_with_progress php8.1-zip
+install_with_progress php8.1-bcmath
 
 # Prompt for domain and database details
 echo -e "\n\e[1;34mEnter your domain (e.g. example.com):\e[0m"
@@ -136,7 +136,7 @@ unzip -q wordpress.zip &>/dev/null
 rm -f wordpress.zip &>/dev/null
 
 # Configure Nginx for the domain
-echo "Configuring Nginx..."
+echo "Configuring Nginx for ${domain}..."
 sudo tee /etc/nginx/sites-available/${domain} &>/dev/null <<EOF
 server {
     listen 80;
@@ -227,11 +227,7 @@ sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:
 echo "Restarting Nginx..."
 sudo systemctl restart nginx &>/dev/null
 
-# Perform curl request and display response headers in terminal
-echo -e "\n\e[1;32mChecking the HTTP response headers...\e[0m"
+# Display success message
 echo -e "\n\e[1;34m--------------------------------------\e[0m"
-curl -I http://www.${domain} | tee /dev/tty
+echo -e "\n\e[1;32mWordPress installation for ${domain} completed successfully!\e[0m"
 echo -e "\n\e[1;34m--------------------------------------\e[0m"
-
-# Final message to user
-echo -e "\n\e[1;32mWordPress installation completed. Please visit http://${domain} to access your WordPress website.\e[0m"
