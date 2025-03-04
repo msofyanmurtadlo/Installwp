@@ -128,9 +128,8 @@ sudo tee /etc/nginx/sites-available/${domain} &>/dev/null <<EOF
 server {
     listen 80;
     listen [::]:80;
- 
-    # SSL configuration
 
+    # SSL configuration
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
     ssl_certificate         /etc/ssl/${domain}/cert.pem;
@@ -217,9 +216,10 @@ echo "Setting permissions for WordPress files..."
 sudo chown -R www-data:www-data /var/www/${domain}/wordpress/ &>/dev/null
 sudo chmod 755 /var/www/${domain}/wordpress/wp-content &>/dev/null
 
-# Modify Nginx configuration for security limits
+# Modify Nginx configuration for security limits and timeouts
 echo "Modifying Nginx configuration for rate limiting and timeouts..."
-sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;\n\ \ \ \ limit_conn_zone \$binary_remote_addr zone=addr:10m;\n\ \ \ \ client_body_timeout 10s;\n\ \ \ \ client_header_timeout 10s;\n\ \ \ \ send_timeout 10s;' /etc/nginx/nginx.conf &>/dev/null
+sudo sed -i '/keepalive_timeout/d' /etc/nginx//etc/nginx/nginx.conf &>/dev/null
+sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;\n\ \ \ \ limit_conn_zone \$binary_remote_addr zone=addr:10m;\n\ \ \ \ client_body_timeout 10s;\n\ \ \ \ client_header_timeout 10s;\n\ \ \ \ keepalive_timeout 10s;\n\ \ \ \ send_timeout 10s;' /etc/nginx/nginx.conf &>/dev/null
 
 # Restart Nginx
 echo "Restarting Nginx..."
