@@ -25,27 +25,27 @@ install_silently mariadb-server
 install_silently mariadb-client
 ufw allow 'Nginx Full' &>/dev/null
 
-# Install PHP 8.4
-echo "Installing PHP 8.4..."
+# Install PHP 8.1
+echo "Installing PHP 8.1..."
 sudo add-apt-repository ppa:ondrej/php -y &>/dev/null
 sudo apt update &>/dev/null
-install_silently php8.4-fpm
-install_silently php8.4-common
-install_silently php8.4-dom
-install_silently php8.4-intl
-install_silently php8.4-mysql
-install_silently php8.4-xml
-install_silently php8.4-xmlrpc
-install_silently php8.4-curl
-install_silently php8.4-gd
-install_silently php8.4-imagick
-install_silently php8.4-cli
-install_silently php8.4-dev
-install_silently php8.4-imap
-install_silently php8.4-mbstring
-install_silently php8.4-soap
-install_silently php8.4-zip
-install_silently php8.4-bcmath
+install_silently php8.1-fpm
+install_silently php8.1-common
+install_silently php8.1-dom
+install_silently php8.1-intl
+install_silently php8.1-mysql
+install_silently php8.1-xml
+install_silently php8.1-xmlrpc
+install_silently php8.1-curl
+install_silently php8.1-gd
+install_silently php8.1-imagick
+install_silently php8.1-cli
+install_silently php8.1-dev
+install_silently php8.1-imap
+install_silently php8.1-mbstring
+install_silently php8.1-soap
+install_silently php8.1-zip
+install_silently php8.1-bcmath
 
 # Prompt for domain and database details
 echo -e "\n\e[1;34mEnter your domain (e.g. example.com):\e[0m"
