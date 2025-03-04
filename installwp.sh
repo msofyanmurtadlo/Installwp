@@ -85,12 +85,13 @@ install_with_progress nginx software-properties-common unzip mariadb-server mari
 # Allow Nginx through UFW
 ufw allow 'Nginx Full' &>/dev/null
 
+# Adding PHP repository
 echo "Adding PHP repository..."
 sudo add-apt-repository ppa:ondrej/php -y &>/dev/null
 sudo apt update &>/dev/null
 
-# Install PHP 8.1 and required extensions in one command
-install_with_progress php8.1-fpm php8.1-common php8.1-dom php8.1-intl php8.1-mysql php8.1-xml php8.1-xmlrpc php8.1-curl php8.1-gd php8.1-imagick php8.1-cli php8.1-dev php8.1-imap php8.1-mbstring php8.1-soap php8.1-zip php8.1-bcmath
+# Install PHP 8.4 and required extensions in one command
+install_with_progress php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath -y
 
 # Prompt for domain and database details
 echo -e "\n\e[1;34mEnter your domain (e.g. example.com):\e[0m"
@@ -127,19 +128,16 @@ sudo tee /etc/nginx/sites-available/${domain} &>/dev/null <<EOF
 server {
     listen 80;
     listen [::]:80;
-
-    listen 443 ssl http2;
-    ssl_certificate /etc/ssl/${domain}/cert.pem;
-    ssl_certificate_key /etc/ssl/${domain}/key.pem;
-    
-    server_name ${domain} www.${domain};
+    server_name www.${domain} ${domain};
     root /var/www/${domain}/wordpress/;
-    index index.php index.html index.htm;
+    index index.php index.html index.htm index.nginx-debian.html;
 
-    error_log /var/log/nginx/${domain}.error;
-    access_log /var/log/nginx/${domain}.access;
+    error_log /var/log/nginx/wordpress.error;
+    access_log /var/log/nginx/wordpress.access;
 
     location / {
+        limit_req zone=mylimit burst=20 nodelay;
+        limit_conn addr 10;
         try_files \$uri \$uri/ /index.php;
     }
 
@@ -161,7 +159,7 @@ server {
     }
 
     location ~ \.php$ {
-        fastcgi_pass unix:/run/php/php8.1-fpm.sock;  # PHP 8.1 socket
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         include fastcgi_params;
         include snippets/fastcgi-php.conf;
@@ -169,6 +167,7 @@ server {
         fastcgi_buffer_size 128k;
     }
 
+    # Enable gzip compression
     gzip on;
     gzip_vary on;
     gzip_min_length 1000;
@@ -176,12 +175,14 @@ server {
     gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
     gzip_proxied any;
 
+    # A long browser cache lifetime can speed up repeat visits to your page
     location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
         access_log off;
         log_not_found off;
         expires 360d;
     }
 
+    # Disable access to hidden files
     location ~ /\.ht {
         access_log off;
         log_not_found off;
