@@ -1,12 +1,14 @@
 #!/bin/bash
 
-# Function to install a package silently and only show success
+# Function to install a package silently and show progress
 install_silently() {
-    sudo apt install -y "$1" &>/dev/null && echo -e "\e[1;32m$1 installed successfully.\e[0m"
+    echo -n "Installing $1... "
+    sudo apt install -y "$1" &>/dev/null
+    echo -e "\e[1;32m$1 installed successfully.\e[0m"
 }
 
-# Function for showing a spinner during long operations
-spinner() {
+# Function for showing a progress bar during long operations
+progress_bar() {
     local pid=$!
     local delay=0.1
     local spinstr='|/-\\'
@@ -83,11 +85,11 @@ FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-# Download and set up WordPress
+# Download and set up WordPress with progress bar
 echo "Setting up WordPress..."
 mkdir -p /var/www/${domain} &>/dev/null
 cd /var/www/${domain}
-wget -q https://wordpress.org/latest.zip -O wordpress.zip &>/dev/null
+wget -q --show-progress https://wordpress.org/latest.zip -O wordpress.zip &>/dev/null
 unzip -q wordpress.zip &>/dev/null
 rm -f wordpress.zip &>/dev/null
 
