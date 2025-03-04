@@ -144,10 +144,10 @@ failregex = .*authentication failure.*OR.*login failed.*
 ignoreregex =
 EOF
 
-# Install ModSecurity
+# Menginstal ModSecurity dengan menggunakan Nginx ModSecurity dari sumber
 sudo apt-get install -y libnginx-mod-http-modsecurity
 
-# Aktifkan ModSecurity di Nginx
+# Pastikan ModSecurity diaktifkan dalam konfigurasi Nginx
 sudo tee -a /etc/nginx/nginx.conf > /dev/null <<EOF
 modsecurity on;
 modsecurity_rules_file /etc/nginx/modsec/main.conf;
