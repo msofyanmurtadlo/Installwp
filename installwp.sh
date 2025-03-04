@@ -128,6 +128,14 @@ sudo tee /etc/nginx/sites-available/${domain} &>/dev/null <<EOF
 server {
     listen 80;
     listen [::]:80;
+ 
+    # SSL configuration
+
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    ssl_certificate         /etc/ssl/${domain}/cert.pem;
+    ssl_certificate_key     /etc/ssl/${domain}/key.pem;
+
     server_name www.${domain} ${domain};
     root /var/www/${domain}/wordpress/;
     index index.php index.html index.htm index.nginx-debian.html;
