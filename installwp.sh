@@ -21,18 +21,13 @@ curl -fsSL https://packages.frankenphp.dev/KEY.gpg | sudo gpg --dearmor -o /usr/
 sudo apt-get update
 sudo apt-get install frankenphp -y
 
-sudo apt-get install apt-transport-https curl -y
-sudo mkdir -p /etc/apt/keyrings
-sudo curl -o /etc/apt/keyrings/mariadb-keyring.pgp 'https://mariadb.org/mariadb_release_signing_key.pgp'
-sudo apt-get install mariadb-server -y
-
-mysql_secure_installation
+sudo apt install -y mariadb-server mariadb-client
 
 sudo mariadb <<EOF
-GRANT ALL PRIVILEGES ON * . * TO 'root'@'localhost' IDENTIFIED BY '${dbpass}';
-CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
 CREATE DATABASE ${dbname};
-grant all privileges on ${dbname}.* to '${dbuser}'@'localhost';
+CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
+GRANT ALL PRIVILEGES ON ${dbname}.* TO '${dbuser}'@'localhost';
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${dbpass}';
 FLUSH PRIVILEGES;
 EXIT;
 EOF
