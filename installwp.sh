@@ -1,48 +1,55 @@
 #!/bin/bash
 
-# Install dialog untuk UI yang lebih interaktif
-sudo apt install -y dialog
+# Function for showing a spinner during long operations
+spinner() {
+    local pid=$!
+    local delay=0.1
+    local spinstr='|/-\\'
+    local temp
 
-# Fungsi untuk menampilkan progress
-progress_bar() {
-    (
-    for i in {1..100}; do
-        echo $i
-        sleep 0.05
+    while true; do
+        temp="${spinstr#?}"
+        printf " [%c]  " "$spinstr"
+        spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        kill -0 "$pid" 2>/dev/null || break
+        printf "\b\b\b\b\b\b"
     done
-    ) | dialog --gauge "Installing Packages" 10 70 0
+    echo " Done!"
 }
 
-# Fungsi untuk menampilkan pesan konfirmasi
-info_message() {
-    dialog --msgbox "$1" 10 50
-}
-
-# Menyembunyikan proses awal dengan progress bar
-progress_bar
+# Show an introductory message
+echo -e "\n\e[1;32mStarting WordPress Installation...\e[0m\n"
 
 # Enable firewall and allow SSH
-ufw enable
-ufw allow ssh
+echo "Enabling firewall and allowing SSH..."
+ufw enable & spinner
 
-# Installing required packages
-sudo apt update
-sudo apt install -y nginx software-properties-common unzip mariadb-server mariadb-client
-ufw allow 'Nginx Full'
+# Install necessary packages
+echo "Updating packages and installing dependencies..."
+sudo apt update & spinner
+sudo apt install -y nginx software-properties-common unzip mariadb-server mariadb-client & spinner
+ufw allow 'Nginx Full' & spinner
 
-# Installing PHP 8.4 and related extensions
-sudo add-apt-repository ppa:ondrej/php -y
-sudo apt update
-sudo apt install -y php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath
+# Install PHP 8.4
+echo "Installing PHP 8.4 and necessary PHP extensions..."
+sudo add-apt-repository ppa:ondrej/php -y & spinner
+sudo apt update & spinner
+sudo apt install -y php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath & spinner
 
 # Prompt for domain and database details
-domain=$(dialog --inputbox "Enter your domain (e.g. example.com):" 8 40 3>&1 1>&2 2>&3)
-dbname=$(dialog --inputbox "Enter the name of your database:" 8 40 3>&1 1>&2 2>&3)
-dbuser=$(dialog --inputbox "Enter your database username:" 8 40 3>&1 1>&2 2>&3)
-dbpass=$(dialog --passwordbox "Enter your database password:" 8 40 3>&1 1>&2 2>&3)
+echo -e "\n\e[1;34mEnter your domain (e.g. example.com):\e[0m"
+read domain
+echo -e "\n\e[1;34mEnter the name of your database:\e[0m"
+read dbname
+echo -e "\n\e[1;34mEnter your database username:\e[0m"
+read dbuser
+echo -e "\n\e[1;34mEnter your database password:\e[0m"
+read -s dbpass
 
 # Create database and user
-sudo mariadb <<EOF
+echo "Creating the database and user..."
+sudo mariadb <<EOF & spinner
 CREATE DATABASE ${dbname};
 CREATE USER ${dbuser}@localhost IDENTIFIED BY '${dbpass}';
 GRANT ALL PRIVILEGES ON ${dbname}.* TO ${dbuser}@localhost;
@@ -51,15 +58,17 @@ FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-# Create the WordPress directory and download files
-mkdir -p /var/www/${domain}
+# Download and set up WordPress
+echo "Setting up WordPress..."
+mkdir -p /var/www/${domain} & spinner
 cd /var/www/${domain}
-wget https://wordpress.org/latest.zip -O wordpress.zip
-unzip wordpress.zip
-rm wordpress.zip
+wget https://wordpress.org/latest.zip -O wordpress.zip & spinner
+unzip wordpress.zip & spinner
+rm wordpress.zip & spinner
 
-# Configure Nginx
-sudo tee /etc/nginx/sites-available/${domain} <<EOF
+# Configure Nginx for the domain
+echo "Configuring Nginx for the domain..."
+sudo tee /etc/nginx/sites-available/${domain} <<EOF & spinner
 server {
     listen 80;
     listen [::]:80;
@@ -123,31 +132,37 @@ server {
 }
 EOF
 
-# Create symbolic link to enable site
-sudo ln -s /etc/nginx/sites-available/${domain} /etc/nginx/sites-enabled/
+# Enable the site and create SSL directory
+sudo ln -s /etc/nginx/sites-available/${domain} /etc/nginx/sites-enabled/ & spinner
+mkdir /etc/ssl/${domain} & spinner
 
-# Create SSL directory
-mkdir /etc/ssl/${domain}
+# User prompt for SSL certificates
+echo -e "\n\e[1;33mPlease upload your certificate to /etc/ssl/${domain}/cert.pem and your private key to /etc/ssl/${domain}/key.pem.\e[0m"
+echo -e "\nPress any key to continue after uploading your files..."
+read -n 1 -s -r
 
-# Show message to user to upload certificates
-info_message "Please upload your certificate to /etc/ssl/${domain}/cert.pem and your private key to /etc/ssl/${domain}/key.pem. Press any key when you're ready..."
-
-# User will upload the cert.pem and key.pem files
+# Configure SSL certificates
 sudo nano /etc/ssl/${domain}/cert.pem
 sudo nano /etc/ssl/${domain}/key.pem
 
-# Set file permissions
-sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
-sudo chmod 755 /var/www/${domain}/wordpress/wp-content
+# Set correct permissions
+echo "Setting permissions for WordPress files..."
+sudo chown -R www-data:www-data /var/www/${domain}/wordpress/ & spinner
+sudo chmod 755 /var/www/${domain}/wordpress/wp-content & spinner
 
-# Modify Nginx configuration for limits and timeouts
-sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;\n\ \ \ \ limit_conn_zone \$binary_remote_addr zone=addr:10m;\n\ \ \ \ client_body_timeout 10s;\n\ \ \ \ client_header_timeout 10s;\n\ \ \ \ send_timeout 10s;' /etc/nginx/nginx.conf
+# Modify Nginx configuration for security limits
+echo "Modifying Nginx configuration for rate limiting and timeouts..."
+sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;\n\ \ \ \ limit_conn_zone \$binary_remote_addr zone=addr:10m;\n\ \ \ \ client_body_timeout 10s;\n\ \ \ \ client_header_timeout 10s;\n\ \ \ \ send_timeout 10s;' /etc/nginx/nginx.conf & spinner
 
 # Restart Nginx
-sudo systemctl restart nginx
+echo "Restarting Nginx..."
+sudo systemctl restart nginx & spinner
 
-# Perform curl and display the result in a dialog box
-http_response=$(curl -I http://www.${domain} 2>/dev/null | dialog --stdout --title "HTTP Response" --msgbox "$(curl -I http://www.${domain} 2>/dev/null)" 15 70)
+# Perform curl request and display response headers in terminal
+echo -e "\n\e[1;32mChecking the HTTP response headers...\e[0m"
+echo -e "\n\e[1;34m--------------------------------------\e[0m"
+curl -I http://www.${domain} | tee /dev/tty
+echo -e "\n\e[1;34m--------------------------------------\e[0m"
 
-# Show message confirming the completion
-info_message "WordPress installation completed. Please visit http://${domain} to access your WordPress website."
+# Final message to user
+echo -e "\n\e[1;32mWordPress installation completed. Please visit http://${domain} to access your WordPress website.\e[0m"
