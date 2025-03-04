@@ -12,7 +12,7 @@ read -s dbpass
 ufw enable
 ufw allow ssh
 
-# Install dependencies untuk PHP dan FrankenPHP
+# Install dependencies untuk PHP
 sudo apt-get install software-properties-common -y
 sudo apt-get install apt-transport-https ca-certificates lsb-release curl -y
 
@@ -144,7 +144,7 @@ failregex = .*authentication failure.*OR.*login failed.*
 ignoreregex =
 EOF
 
-# Menginstal ModSecurity dengan menggunakan Nginx ModSecurity dari sumber
+# Install ModSecurity (Nginx security)
 sudo apt-get install -y libnginx-mod-http-modsecurity
 
 # Pastikan ModSecurity diaktifkan dalam konfigurasi Nginx
