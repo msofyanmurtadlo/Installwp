@@ -1,149 +1,129 @@
 #!/bin/bash
 
-read -p "Enter domain (e.g., domainku.com): " domain
-read -p "Enter database name: " dbname
-read -p "Enter database user: " dbuser
-read -p "Enter database password: " dbpass
+# Input dari user
+read -p "Masukkan domain (contoh: example.com): " DOMAIN
+read -p "Masukkan nama database: " DBNAME
+read -p "Masukkan nama pengguna database: " DBUSER
+read -p "Masukkan kata sandi database dan root MariaDB: " DBPASS
 
+# Pembaruan sistem
 sudo apt update -y
 sudo apt upgrade -y
-sudo apt install ufw nginx zip mariadb-server mariadb-client apt-transport-https curl fail2ban -y
 
+# Menginstal dependensi yang diperlukan
+sudo apt install -y \
+    nginx \
+    mariadb-server \
+    curl \
+    git \
+    unzip \
+    sudo \
+    gnupg2 \
+    lsb-release \
+    ca-certificates \
+    python3-certbot-nginx \
+    certbot
+
+# Instal PHP 8.4 dan dependensinya
 sudo add-apt-repository ppa:ondrej/php -y
 sudo apt update -y
-sudo apt install php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath -y
+sudo apt install -y \
+    php8.4-cli \
+    php8.4-mysql \
+    php8.4-curl \
+    php8.4-json \
+    php8.4-xml \
+    php8.4-mbstring \
+    php8.4-zip
 
-sudo ufw enable
-sudo ufw allow ssh
-sudo ufw allow 'Nginx Full'
+# Install FrankenPHP
+curl -sSL https://github.com/frankenphp/frankenphp/releases/download/v0.1.0/frankenphp-linux-amd64-v0.1.0.tar.gz -o /tmp/frankenphp.tar.gz
+sudo tar -zxvf /tmp/frankenphp.tar.gz -C /usr/local/bin
+sudo chmod +x /usr/local/bin/frankenphp
 
+# Konfigurasi Nginx untuk FrankenPHP
+sudo cp /etc/nginx/sites-available/default /etc/nginx/sites-available/$DOMAIN
+sudo bash -c "cat > /etc/nginx/sites-available/$DOMAIN" <<EOL
+server {
+    listen 80;
+    server_name $DOMAIN;
+    
+    root /var/www/$DOMAIN;
+    index index.php index.html index.htm;
+    
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+
+    # Passthrough untuk FrankenPHP
+    location ~ \.php\$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/var/run/frankenphp.sock;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+    }
+    
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOL
+
+# Aktifkan situs Nginx
+sudo ln -s /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+
+# Install dan konfigurasikan MariaDB
+sudo systemctl start mariadb
+sudo systemctl enable mariadb
+
+# Mengamankan instalasi MariaDB dan mengatur password root dengan DBPASS
+sudo mysql_secure_installation <<EOF
+y
+$DBPASS
+$DBPASS
+y
+y
+y
+y
+EOF
+
+# Membuat database dan user untuk WordPress
 sudo mariadb <<EOF
-CREATE DATABASE ${dbname};
-CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
-GRANT ALL PRIVILEGES ON ${dbname}.* TO '${dbuser}'@'localhost';
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${dbpass}';
+CREATE DATABASE $DBNAME;
+CREATE USER '$DBUSER'@'localhost' IDENTIFIED BY '$DBPASS';
+GRANT ALL PRIVILEGES ON $DBNAME.* TO '$DBUSER'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-sudo mkdir /var/www/$domain
-cd /var/www/$domain
-sudo wget https://wordpress.org/latest.zip
-sudo unzip latest.zip
-sudo rm -r latest.zip
+# Install WordPress
+cd /var/www/
+sudo wget https://wordpress.org/latest.tar.gz
+sudo tar -xvzf latest.tar.gz
+sudo mv wordpress $DOMAIN
+sudo chown -R www-data:www-data /var/www/$DOMAIN
 
-sudo tee /etc/nginx/sites-available/$domain <<EOF
-server {
-  listen 80;
-  listen [::]:80;
-  server_name www.$domain $domain;
-  root /var/www/$domain/wordpress/;
-  index index.php index.html index.htm index.nginx-debian.html;
+# Konfigurasi WordPress
+cd /var/www/$DOMAIN
+sudo cp wp-config-sample.php wp-config.php
+sudo sed -i "s/database_name_here/$DBNAME/" wp-config.php
+sudo sed -i "s/username_here/$DBUSER/" wp-config.php
+sudo sed -i "s/password_here/$DBPASS/" wp-config.php
+sudo sed -i "s/localhost/127.0.0.1/" wp-config.php
 
-  error_log /var/log/nginx/wordpress.error;
-  access_log /var/log/nginx/wordpress.access;
+# Install dan mengonfigurasi SSL dengan Let's Encrypt
+sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos --email youremail@example.com
 
-  location / {
-    limit_req zone=mylimit burst=20 nodelay;
-    limit_conn addr 10;
-    try_files \$uri \$uri/ /index.php;
-  }
+# Restart Nginx untuk memastikan semua konfigurasi diterapkan
+sudo systemctl restart nginx
 
-  location ~ ^/wp-json/ {
-    rewrite ^/wp-json/(.*?)\$ /?rest_route=/$1 last;
-  }
+# Restart FrankenPHP
+sudo systemctl restart frankenphp
 
-  location ~* /wp-sitemap.*\.xml {
-    try_files \$uri \$uri/ /index.php\$is_args\$args;
-  }
+# Memberikan izin folder dan file
+sudo chown -R www-data:www-data /var/www/$DOMAIN
 
-  error_page 404 /404.html;
-  error_page 500 502 503 504 /50x.html;
-
-  client_max_body_size 20M;
-
-  location = /50x.html {
-    root /usr/share/nginx/html;
-  }
-
-  location ~ \.php\$ {
-    fastcgi_pass unix:/run/php/php8.4-fpm.sock;
-    fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-    include fastcgi_params;
-    include snippets/fastcgi-php.conf;
-    fastcgi_buffers 1024 4k;
-    fastcgi_buffer_size 128k;
-  }
-
-  gzip on;
-  gzip_vary on;
-  gzip_min_length 1000;
-  gzip_comp_level 5;
-  gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
-  gzip_proxied any;
-
-  location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)\$ {
-       access_log        off;
-       log_not_found     off;
-       expires           360d;
-  }
-
-  location ~ /\.ht {
-      access_log off;
-      log_not_found off;
-      deny all;
-  }
-}
-EOF
-
-sudo ln -s /etc/nginx/sites-available/$domain /etc/nginx/sites-enabled/
-sudo mkdir /etc/ssl/$domain
-
-sudo tee -a /etc/nginx/sites-available/$domain <<EOF
-# SSL configuration
-
-listen 443 ssl http2;
-listen [::]:443 ssl http2;
-ssl_certificate         /etc/ssl/$domain/cert.pem;
-ssl_certificate_key     /etc/ssl/$domain/key.pem;
-EOF
-
-sudo chown -R www-data:www-data /var/www/$domain/wordpress/
-sudo chmod 755 /var/www/$domain/wordpress/wp-content
-
-sudo sed -i '/keepalive_timeout/d' /etc/nginx/nginx.conf
-sudo tee -a /etc/nginx/nginx.conf <<EOF
-limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;
-limit_conn_zone \$binary_remote_addr zone=addr:10m;
-client_body_timeout   10s;
-client_header_timeout 10s;
-keepalive_timeout     10s;
-send_timeout          10s;
-EOF
-
-sudo service nginx restart
-
-sudo tee /etc/fail2ban/jail.local <<EOF
-[sshd]
-enabled = true
-port = ssh
-logpath = /var/log/auth.log
-maxretry = 3
-bantime = 600
-findtime = 600
-EOF
-
-sudo tee -a /etc/fail2ban/jail.local <<EOF
-[wordpress]
-enabled = true
-port = http,https
-filter = wordpress
-logpath = /var/log/nginx/wordpress.error
-maxretry = 3
-bantime = 600
-findtime = 600
-EOF
-
-sudo systemctl restart fail2ban
-
-echo "Setup complete for $domain"
+# Menyelesaikan instalasi WordPress melalui browser
+echo "Instalasi selesai! Silakan buka https://$DOMAIN untuk melanjutkan pengaturan WordPress."
