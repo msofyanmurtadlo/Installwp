@@ -1,31 +1,22 @@
 #!/bin/bash
 
-echo "Masukkan nama domain (contoh: domainku.com):"
-read domain
-echo "Masukkan nama database:"
-read dbname
-echo "Masukkan username database:"
-read dbuser
-echo "Masukkan password database:"
-read -s dbpass
+read -p "Enter domain (e.g., domainku.com): " domain
+read -p "Enter database name: " dbname
+read -p "Enter database user: " dbuser
+read -p "Enter database password: " dbpass
 
-ufw enable
-ufw allow ssh
+sudo apt update -y
+sudo apt upgrade -y
+sudo apt install ufw nginx zip mariadb-server mariadb-client apt-transport-https curl fail2ban -y
 
-# Install dependencies untuk PHP
-sudo apt-get install software-properties-common -y
-sudo apt-get install apt-transport-https ca-certificates lsb-release curl -y
+sudo add-apt-repository ppa:ondrej/php -y
+sudo apt update -y
+sudo apt install php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath -y
 
-# Menambahkan FrankenPHP repository untuk PHP 8.4
-echo "deb https://deb.php.frankenphp.dev $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/frankenphp.list
-curl -fsSL https://packages.frankenphp.dev/KEY.gpg | sudo gpg --dearmor -o /usr/share/keyrings/frankenphp.gpg
-sudo apt-get update
-sudo apt-get install frankenphp -y
+sudo ufw enable
+sudo ufw allow ssh
+sudo ufw allow 'Nginx Full'
 
-# Install MariaDB
-sudo apt install -y mariadb-server mariadb-client
-
-# Setup database untuk WordPress
 sudo mariadb <<EOF
 CREATE DATABASE ${dbname};
 CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
@@ -35,21 +26,18 @@ FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-# Install dan setup WordPress
-sudo mkdir -p /var/www/${domain}
-cd /var/www/${domain}
-wget https://wordpress.org/latest.zip
-sudo apt install zip -y
-unzip latest.zip
-rm -r latest.zip
+sudo mkdir /var/www/$domain
+cd /var/www/$domain
+sudo wget https://wordpress.org/latest.zip
+sudo unzip latest.zip
+sudo rm -r latest.zip
 
-# Konfigurasi Nginx untuk WordPress
-sudo tee /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
+sudo tee /etc/nginx/sites-available/$domain <<EOF
 server {
   listen 80;
   listen [::]:80;
-  server_name www.${domain} ${domain};
-  root /var/www/${domain}/wordpress/;
+  server_name www.$domain $domain;
+  root /var/www/$domain/wordpress/;
   index index.php index.html index.htm index.nginx-debian.html;
 
   error_log /var/log/nginx/wordpress.error;
@@ -62,8 +50,8 @@ server {
   }
 
   location ~ ^/wp-json/ {
-     rewrite ^/wp-json/(.*?)$ /?rest_route=/$1 last;
-   }
+    rewrite ^/wp-json/(.*?)\$ /?rest_route=/$1 last;
+  }
 
   location ~* /wp-sitemap.*\.xml {
     try_files \$uri \$uri/ /index.php\$is_args\$args;
@@ -78,10 +66,13 @@ server {
     root /usr/share/nginx/html;
   }
 
-  location ~ \.php$ {
-    frankenphp_pass;
+  location ~ \.php\$ {
+    fastcgi_pass unix:/run/php/php8.4-fpm.sock;
     fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
     include fastcgi_params;
+    include snippets/fastcgi-php.conf;
+    fastcgi_buffers 1024 4k;
+    fastcgi_buffer_size 128k;
   }
 
   gzip on;
@@ -91,7 +82,7 @@ server {
   gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
   gzip_proxied any;
 
-  location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
+  location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)\$ {
        access_log        off;
        log_not_found     off;
        expires           360d;
@@ -105,62 +96,53 @@ server {
 }
 EOF
 
-# SSL Configuration
-sudo mkdir /etc/ssl/${domain}
+sudo ln -s /etc/nginx/sites-available/$domain /etc/nginx/sites-enabled/
 
-# Menambahkan konfigurasi SSL pada Nginx
-sudo tee -a /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
+sudo tee -a /etc/nginx/sites-available/$domain <<EOF
+# SSL configuration
+
 listen 443 ssl http2;
 listen [::]:443 ssl http2;
-ssl_certificate         /etc/ssl/${domain}/cert.pem;
-ssl_certificate_key     /etc/ssl/${domain}/key.pem;
+ssl_certificate         /etc/ssl/$domain/cert.pem;
+ssl_certificate_key     /etc/ssl/$domain/key.pem;
 EOF
 
-# Set permissions untuk WordPress
-sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
-sudo chmod 755 /var/www/${domain}/wordpress/wp-content
+sudo chown -R www-data:www-data /var/www/$domain/wordpress/
+sudo chmod 755 /var/www/$domain/wordpress/wp-content
 
-# Install Fail2Ban untuk perlindungan
-sudo apt install fail2ban -y
-
-# Konfigurasi Fail2Ban
-sudo tee /etc/fail2ban/jail.local > /dev/null <<EOF
-[sshd]
-enabled  = true
-port     = ssh
-logpath  = /var/log/auth.log
-maxretry = 3
-
-[wordpress]
-enabled  = true
-filter   = wordpress
-logpath  = /var/www/${domain}/wordpress/wp-content/debug.log
-maxretry = 5
-EOF
-
-sudo tee /etc/fail2ban/filter.d/wordpress.conf > /dev/null <<EOF
-[Definition]
-failregex = .*authentication failure.*OR.*login failed.*
-ignoreregex =
-EOF
-
-# Install ModSecurity (Nginx security)
-sudo apt-get install -y libnginx-mod-http-modsecurity
-
-# Pastikan ModSecurity diaktifkan dalam konfigurasi Nginx
-sudo tee -a /etc/nginx/nginx.conf > /dev/null <<EOF
-modsecurity on;
-modsecurity_rules_file /etc/nginx/modsec/main.conf;
-
+sudo sed -i '/keepalive_timeout/d' /etc/nginx/nginx.conf
+sudo tee -a /etc/nginx/nginx.conf <<EOF
 limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;
 limit_conn_zone \$binary_remote_addr zone=addr:10m;
 client_body_timeout   10s;
 client_header_timeout 10s;
+keepalive_timeout     10s;
 send_timeout          10s;
 EOF
 
-# Restart layanan
 sudo service nginx restart
-sudo service fail2ban restart
 
-echo "Instalasi selesai! Anda dapat mengakses WordPress melalui https://$domain"
+sudo tee /etc/fail2ban/jail.local <<EOF
+[sshd]
+enabled = true
+port = ssh
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 600
+findtime = 600
+EOF
+
+sudo tee -a /etc/fail2ban/jail.local <<EOF
+[wordpress]
+enabled = true
+port = http,https
+filter = wordpress
+logpath = /var/log/nginx/wordpress.error
+maxretry = 3
+bantime = 600
+findtime = 600
+EOF
+
+sudo systemctl restart fail2ban
+
+echo "Setup complete for $domain"
