@@ -29,6 +29,51 @@ echo -e "\n\e[1;32mStarting WordPress Installation...\e[0m\n"
 ufw enable &>/dev/null
 ufw allow ssh &>/dev/null
 
+# Install Fail2Ban
+echo "Installing Fail2Ban..."
+install_silently fail2ban
+
+# Enable and start Fail2Ban
+sudo systemctl enable fail2ban &>/dev/null
+sudo systemctl start fail2ban &>/dev/null
+
+# Install and configure Fail2Ban for SSH
+echo "Configuring Fail2Ban for SSH..."
+sudo tee /etc/fail2ban/jail.d/defaults-debian.conf &>/dev/null <<EOF
+[sshd]
+enabled = true
+port = ssh
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 600
+findtime = 600
+EOF
+
+# Install packages for WordPress protection
+echo "Configuring Fail2Ban for WordPress..."
+sudo tee /etc/fail2ban/jail.d/wordpress.conf &>/dev/null <<EOF
+[wordpress]
+enabled = true
+filter = wordpress
+action = iptables[name=wordpress, port=http, protocol=tcp]
+logpath = /var/www/*/wordpress/wp-content/debug.log
+maxretry = 3
+bantime = 600
+findtime = 600
+EOF
+
+# Configure Fail2Ban filter for WordPress
+echo "Creating Fail2Ban filter for WordPress..."
+sudo tee /etc/fail2ban/filter.d/wordpress.conf &>/dev/null <<EOF
+[Definition]
+failregex = <HOST> -.*"(GET|POST).*wp-login.php
+ignoreregex =
+EOF
+
+# Reload Fail2Ban to apply the new configuration
+echo "Reloading Fail2Ban..."
+sudo systemctl reload fail2ban &>/dev/null
+
 # Update packages and install required software
 echo "Installing required software..."
 sudo apt update &>/dev/null
