@@ -69,6 +69,25 @@ sudo tee /etc/nginx/sites-available/${domain} <<EOF
 server {
     listen 80;
     server_name ${domain} www.${domain};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${domain} www.${domain};
+    
+    ssl_certificate /etc/ssl/${domain}/cert.pem;
+    ssl_certificate_key /etc/ssl/${domain}/key.pem;
+    
+    # Strong SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256';
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
     root /var/www/${domain}/wordpress/;
     index index.php index.html index.htm;
 
@@ -137,27 +156,9 @@ read -n 1 -s -r -p "Press any key when you're ready..."
 sudo nano /etc/ssl/${domain}/cert.pem
 sudo nano /etc/ssl/${domain}/key.pem
 
-# Add SSL configuration in Nginx
-sudo tee -a /etc/nginx/sites-enabled/${domain} <<EOF
-listen 443 ssl http2;
-ssl_certificate /etc/ssl/${domain}/cert.pem;
-ssl_certificate_key /etc/ssl/${domain}/key.pem;
-EOF
-
-# Set permissions for WordPress files
-sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
-sudo chmod 755 /var/www/${domain}/wordpress/wp-content
-
-# Add additional Nginx configurations
-sudo tee -a /etc/nginx/nginx.conf <<EOF
-http {
-    limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;
-    limit_conn_zone \$binary_remote_addr zone=addr:10m;
-    client_body_timeout 10s;
-    client_header_timeout 10s;
-    send_timeout 10s;
-}
-EOF
+# Set permissions for SSL certificate and key
+sudo chmod 644 /etc/ssl/${domain}/cert.pem
+sudo chmod 600 /etc/ssl/${domain}/key.pem
 
 # Restart Nginx to apply changes
 sudo systemctl restart nginx
@@ -166,6 +167,6 @@ sudo systemctl restart nginx
 sudo systemctl status nginx
 
 # Verify if the website is accessible via curl
-curl -I http://www.${domain}
+curl -I https://www.${domain}
 
-echo "WordPress installation completed. Please visit http://${domain} to access your WordPress website."
+echo "WordPress installation completed. Please visit https://${domain} to access your WordPress website."
