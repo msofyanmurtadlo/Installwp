@@ -26,7 +26,7 @@ progress_bar() {
 echo -e "\n\e[1;32mStarting WordPress Installation...\e[0m\n"
 
 # Enable firewall and allow SSH
-ufw enable &>/dev/null
+ufw enable -y &>/dev/null
 ufw allow ssh &>/dev/null
 
 # Install Fail2Ban
