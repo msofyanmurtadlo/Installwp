@@ -34,9 +34,9 @@ sudo apt install -y mariadb-server mariadb-client
 
 sudo mariadb <<EOF
 CREATE DATABASE ${dbname};
-CREATE USER ${dbuser}@localhost IDENTIFIED BY '${dbpass}';
-GRANT ALL PRIVILEGES ON ${dbname}.* TO ${dbuser}@localhost;
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${dbpass}';  
+CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
+GRANT ALL PRIVILEGES ON ${dbname}.* TO '${dbuser}'@'localhost';
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${dbpass}';
 FLUSH PRIVILEGES;
 EXIT;
 EOF
@@ -52,13 +52,13 @@ fi
 
 if [ ! -d "$path" ]; then
     sudo mkdir -p $path
-    echo "Direktori $path berhasil dibuat."
 else
     echo "Direktori $path sudah ada."
 fi
 
 cd $path
-sudo apt install wget
+
+sudo apt install wget -y
 wget http://wordpress.org/latest.tar.gz
 sudo tar -xzvf latest.tar.gz
 rm -r latest.tar.gz
@@ -67,81 +67,65 @@ sudo chmod -R 755 $path/wordpress/
 
 sudo tee /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
 server {
-    listen 80;
-    server_name ${domain} www.${domain};
-    root ${path}/wordpress;
-    index index.php;
-    autoindex off;
-    access_log /var/log/nginx/${domain}-access.log combined;
-    error_log /var/log/nginx/${domain}-error.log;
-    client_max_body_size 10M;
-    client_body_buffer_size 128k;
-    client_body_timeout 10;
-    client_header_timeout 10;
-    keepalive_timeout 5;
+  listen 80;
+  listen [::]:80;
+  server_name www.${domain} ${domain};
+  root ${path}/wordpress/;
+  index index.php index.html index.htm index.nginx-debian.html;
 
-    location / {
-        try_files \$uri \$uri/ /index.php?\$args;
-    }
+  error_log /var/log/nginx/wordpress.error;
+  access_log /var/log/nginx/wordpress.access;
 
-    location ~* /(?:wp-content/uploads|wp-includes)/.*\.php$ {
-        deny all;
-    }
+  location / {
+    limit_req zone=mylimit burst=20 nodelay;
+    limit_conn addr 10;
+    try_files \$uri \$uri/ /index.php;
+  }
 
-    location = /xmlrpc.php {
-        deny all;
-    }
+  location ~ ^/wp-json/ {
+     rewrite ^/wp-json/(.*?)$ /?rest_route=/$1 last;
+  }
 
-    location ~ \.php$ {
-        try_files \$uri =404;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        fastcgi_pass unix:/var/run/php/php8.3-fpm.sock;
-        fastcgi_index index.php;
-    }
+  location ~* /wp-sitemap.*\.xml {
+    try_files \$uri \$uri/ /index.php\$is_args\$args;
+  }
 
-    location = /favicon.ico {
-        log_not_found off;
-        access_log off;
-        expires max;
-    }
+  error_page 404 /404.html;
+  error_page 500 502 503 504 /50x.html;
 
-    location = /robots.txt {
-        log_not_found off;
-        access_log off;
-    }
+  client_max_body_size 20M;
 
-    location ~ /\. {
-        deny all;
-    }
+  location = /50x.html {
+    root /usr/share/nginx/html;
+  }
 
-    location /wp-content/uploads/ {
-        location ~ \.php$ {
-            deny all;
-        }
-    }
+  location ~ \.php$ {
+    fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+    fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+    include fastcgi_params;
+    include snippets/fastcgi-php.conf;
+    fastcgi_buffers 1024 4k;
+    fastcgi_buffer_size 128k;
+  }
 
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    add_header X-Permitted-Cross-Domain-Policies none;
-    add_header X-Frame-Options "SAMEORIGIN";
+  gzip on;
+  gzip_vary on;
+  gzip_min_length 1000;
+  gzip_comp_level 5;
+  gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
+  gzip_proxied any;
 
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1000;
-    gzip_comp_level 5;
-    gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
-    gzip_proxied any;
+  location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
+       access_log        off;
+       log_not_found     off;
+       expires           360d;
+  }
 
-    location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
-        access_log off;
-        log_not_found off;
-        expires 360d;
-    }
-
-    location ~ ^/wp-json/ {
-        rewrite ^/wp-json/(.*?)$ /?rest_route=/$1 last;
-    }
+  location ~ /\.ht {
+      access_log off;
+      log_not_found off;
+      deny all;
+  }
 }
 EOF
 
