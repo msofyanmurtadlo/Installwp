@@ -1,76 +1,55 @@
 #!/bin/bash
 
-echo "Masukkan nama domain (contoh: namadomain.com):"
+echo "Masukkan nama domain (contoh: domainku.com):"
 read domain
-
-echo "Masukkan nama database (contoh: wordpress_db):"
+echo "Masukkan nama database:"
 read dbname
-
-echo "Masukkan username database (contoh: wordpressuser):"
+echo "Masukkan username database:"
 read dbuser
-
 echo "Masukkan password database:"
 read -s dbpass
 
-if ! ufw status | grep -q "Status: active"; then
-    ufw enable
-fi
-
+ufw enable
 ufw allow ssh
-
-sudo apt update && sudo apt upgrade -y
-
 sudo apt install nginx -y
-
 sudo ufw allow 'Nginx Full'
+sudo apt-get install software-properties-common -y
 
-sudo apt install -y lsb-release gnupg2 ca-certificates apt-transport-https software-properties-common
+sudo apt-get install apt-transport-https ca-certificates lsb-release curl -y
+echo "deb https://deb.php.frankenphp.dev $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/frankenphp.list
+curl -fsSL https://packages.frankenphp.dev/KEY.gpg | sudo gpg --dearmor -o /usr/share/keyrings/frankenphp.gpg
+sudo apt-get update
+sudo apt-get install frankenphp -y
 
-sudo add-apt-repository ppa:ondrej/php
+sudo apt-get install apt-transport-https curl -y
+sudo mkdir -p /etc/apt/keyrings
+sudo curl -o /etc/apt/keyrings/mariadb-keyring.pgp 'https://mariadb.org/mariadb_release_signing_key.pgp'
+sudo apt-get install mariadb-server -y
 
-sudo apt install -y php8.3 php8.3-fpm php8.3-bcmath php8.3-xml php8.3-mysql php8.3-zip php8.3-intl php8.3-ldap php8.3-gd php8.3-cli php8.3-bz2 php8.3-curl php8.3-mbstring php8.3-imagick php8.3-tokenizer php8.3-opcache php8.3-redis php8.3-cgi
-
-sudo apt install -y mariadb-server mariadb-client
+mysql_secure_installation
 
 sudo mariadb <<EOF
-CREATE DATABASE ${dbname};
+GRANT ALL PRIVILEGES ON * . * TO 'root'@'localhost' IDENTIFIED BY '${dbpass}';
 CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
-GRANT ALL PRIVILEGES ON ${dbname}.* TO '${dbuser}'@'localhost';
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${dbpass}';
+CREATE DATABASE ${dbname};
+grant all privileges on ${dbname}.* to '${dbuser}'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 EOF
 
-if [ -d "/var/www/website1" ]; then
-    echo "/var/www/website1 sudah ada."
-    echo "Silakan masukkan nama folder baru untuk instalasi WordPress, misalnya website2:"
-    read path
-    path="/var/www/$path"
-else
-    path="/var/www/website1"
-fi
-
-if [ ! -d "$path" ]; then
-    sudo mkdir -p $path
-else
-    echo "Direktori $path sudah ada."
-fi
-
-cd $path
-
-sudo apt install wget -y
-wget http://wordpress.org/latest.tar.gz
-sudo tar -xzvf latest.tar.gz
-rm -r latest.tar.gz
-sudo chown -R www-data:www-data $path/wordpress/
-sudo chmod -R 755 $path/wordpress/
+sudo mkdir -p /var/www/${domain}
+cd /var/www/${domain}
+wget https://wordpress.org/latest.zip
+apt install zip -y
+unzip latest.zip
+rm -r latest.zip
 
 sudo tee /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
 server {
   listen 80;
   listen [::]:80;
   server_name www.${domain} ${domain};
-  root ${path}/wordpress/;
+  root /var/www/${domain}/wordpress/;
   index index.php index.html index.htm index.nginx-debian.html;
 
   error_log /var/log/nginx/wordpress.error;
@@ -82,9 +61,9 @@ server {
     try_files \$uri \$uri/ /index.php;
   }
 
-  location ~ ^/wp-json/ {
+   location ~ ^/wp-json/ {
      rewrite ^/wp-json/(.*?)$ /?rest_route=/$1 last;
-  }
+   }
 
   location ~* /wp-sitemap.*\.xml {
     try_files \$uri \$uri/ /index.php\$is_args\$args;
@@ -100,12 +79,9 @@ server {
   }
 
   location ~ \.php$ {
-    fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+    frankenphp_pass;
     fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
     include fastcgi_params;
-    include snippets/fastcgi-php.conf;
-    fastcgi_buffers 1024 4k;
-    fastcgi_buffer_size 128k;
   }
 
   gzip on;
@@ -129,14 +105,62 @@ server {
 }
 EOF
 
-sudo ln -s /etc/nginx/sites-available/${domain}.conf /etc/nginx/sites-enabled/
+sudo mkdir /etc/ssl/${domain}
 
-sudo sed -i '/http {/a \\n    limit_req_zone $binary_remote_addr zone=mylimit:10m rate=10r/s;\n    limit_conn_zone $binary_remote_addr zone=addr:10m;\n    client_body_timeout   10s;\n    client_header_timeout 10s;\n    keepalive_timeout     10s;\n    send_timeout          10s;\n' /etc/nginx/nginx.conf
+echo "Masukkan sertifikat SSL Anda (paste konten cert.pem):"
+read cert_input
+sudo tee /etc/ssl/${domain}/cert.pem > /dev/null <<< "$cert_input"
 
-sudo apt install -y certbot python3-certbot-nginx
+echo "Masukkan key SSL Anda (paste konten key.pem):"
+read key_input
+sudo tee /etc/ssl/${domain}/key.pem > /dev/null <<< "$key_input"
 
-sudo certbot --nginx --agree-tos --redirect --email admin@${domain} -d ${domain},www.${domain}
+sudo tee -a /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
+listen 443 ssl http2;
+listen [::]:443 ssl http2;
+ssl_certificate         /etc/ssl/${domain}/cert.pem;
+ssl_certificate_key     /etc/ssl/${domain}/key.pem;
+EOF
 
-sudo systemctl reload nginx
+sudo chown www-data:www-data /var/www/${domain}/wordpress/ -R
+chmod 755 /var/www/${domain}/wordpress/wp-content
 
-echo "Instalasi selesai! Anda dapat mengakses WordPress melalui https://${domain}."
+sudo apt install fail2ban -y
+
+sudo tee /etc/fail2ban/jail.local > /dev/null <<EOF
+[sshd]
+enabled  = true
+port     = ssh
+logpath  = /var/log/auth.log
+maxretry = 3
+
+[wordpress]
+enabled  = true
+filter   = wordpress
+logpath  = /var/www/${domain}/wordpress/wp-content/debug.log
+maxretry = 5
+EOF
+
+sudo tee /etc/fail2ban/filter.d/wordpress.conf > /dev/null <<EOF
+[Definition]
+failregex = .*authentication failure.*OR.*login failed.*
+ignoreregex =
+EOF
+
+sudo apt-get install libnginx-mod-security -y
+
+sudo tee -a /etc/nginx/nginx.conf > /dev/null <<EOF
+modsecurity on;
+modsecurity_rules_file /etc/nginx/modsec/main.conf;
+
+limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;
+limit_conn_zone \$binary_remote_addr zone=addr:10m;
+client_body_timeout   10s;
+client_header_timeout 10s;
+send_timeout          10s;
+EOF
+
+sudo service nginx restart
+sudo service fail2ban restart
+
+echo "Instalasi selesai! Anda dapat mengakses WordPress melalui http://$domain"
