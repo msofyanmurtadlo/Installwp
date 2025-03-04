@@ -3,16 +3,16 @@
 # Enable UFW (Firewall)
 ufw enable
 ufw allow ssh
+ufw allow 'Nginx Full'
 
 # Install necessary packages
 sudo apt update
 sudo apt install -y nginx software-properties-common unzip mariadb-server mariadb-client
-ufw allow 'Nginx Full'
 
 # Install PHP 8.4 and required extensions
 sudo add-apt-repository ppa:ondrej/php -y
 sudo apt update
-sudo apt install -y php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath
+sudo apt install -y php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.8-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath
 
 # Ask user for database details
 echo "Enter your domain (e.g. example.com):"
@@ -26,9 +26,9 @@ read dbname
 
 # Create database and user
 sudo mariadb <<EOF
-CREATE DATABASE ${dbname};
+CREATE DATABASE \`${dbname}\`;
 CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
-GRANT ALL PRIVILEGES ON ${dbname}.* TO '${dbuser}'@'localhost';
+GRANT ALL PRIVILEGES ON \`${dbname}\`.* TO '${dbuser}'@'localhost';
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${dbpass}';
 FLUSH PRIVILEGES;
 EXIT;
@@ -69,25 +69,6 @@ sudo tee /etc/nginx/sites-available/${domain} <<EOF
 server {
     listen 80;
     server_name ${domain} www.${domain};
-    return 301 https://\$host\$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name ${domain} www.${domain};
-    
-    ssl_certificate /etc/ssl/${domain}/cert.pem;
-    ssl_certificate_key /etc/ssl/${domain}/key.pem;
-    
-    # Strong SSL configuration
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256';
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-    ssl_stapling on;
-    ssl_stapling_verify on;
-
     root /var/www/${domain}/wordpress/;
     index index.php index.html index.htm;
 
@@ -156,9 +137,27 @@ read -n 1 -s -r -p "Press any key when you're ready..."
 sudo nano /etc/ssl/${domain}/cert.pem
 sudo nano /etc/ssl/${domain}/key.pem
 
-# Set permissions for SSL certificate and key
-sudo chmod 644 /etc/ssl/${domain}/cert.pem
-sudo chmod 600 /etc/ssl/${domain}/key.pem
+# Add SSL configuration in Nginx
+sudo tee -a /etc/nginx/sites-enabled/${domain} <<EOF
+listen 443 ssl http2;
+ssl_certificate /etc/ssl/${domain}/cert.pem;
+ssl_certificate_key /etc/ssl/${domain}/key.pem;
+EOF
+
+# Set permissions for WordPress files
+sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
+sudo chmod 755 /var/www/${domain}/wordpress/wp-content
+
+# Add additional Nginx configurations
+sudo tee -a /etc/nginx/nginx.conf <<EOF
+http {
+    limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;
+    limit_conn_zone \$binary_remote_addr zone=addr:10m;
+    client_body_timeout 10s;
+    client_header_timeout 10s;
+    send_timeout 10s;
+}
+EOF
 
 # Restart Nginx to apply changes
 sudo systemctl restart nginx
@@ -167,6 +166,6 @@ sudo systemctl restart nginx
 sudo systemctl status nginx
 
 # Verify if the website is accessible via curl
-curl -I https://www.${domain}
+curl -I http://www.${domain}
 
-echo "WordPress installation completed. Please visit https://${domain} to access your WordPress website."
+echo "WordPress installation completed. Please visit http://${domain} to access your WordPress website."
