@@ -3,11 +3,11 @@
 # Enable UFW (Firewall)
 ufw enable
 ufw allow ssh
-ufw allow 'Nginx Full'
 
 # Install necessary packages
 sudo apt update
 sudo apt install -y nginx software-properties-common unzip mariadb-server mariadb-client
+ufw allow 'Nginx Full'
 
 # Install PHP 8.4 and required extensions
 sudo add-apt-repository ppa:ondrej/php -y
