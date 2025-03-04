@@ -1,11 +1,25 @@
 #!/bin/bash
 
-# Function to install a package silently and show progress
+# Function to install a package silently and only show success
 install_silently() {
-    echo -n "Installing $1... "
-    # Menjalankan apt-get dan menampilkan progress
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$1" --no-install-recommends | tee /dev/tty | tail -n 10
-    echo -e "\e[1;32m$1 installed successfully.\e[0m"
+    sudo apt install -y "$1" &>/dev/null && echo -e "\e[1;32m$1 installed successfully.\e[0m"
+}
+
+# Function to show a progress bar for installation
+progress_bar() {
+    local pid=$!
+    local delay=0.1
+    local spinstr='|/-\\'
+    local temp
+    while true; do
+        temp="${spinstr#?}"
+        printf " [%c]  " "$spinstr"
+        spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        kill -0 "$pid" 2>/dev/null || break
+        printf "\b\b\b\b\b\b"
+    done
+    echo " Done!"
 }
 
 # Show an introductory message
@@ -113,6 +127,25 @@ server {
 
     location = /50x.html {
         root /usr/share/nginx/html;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass unix:/run/php/php8.1-fpm.sock;  # PHP 8.1 socket
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+        include snippets/fastcgi-php.conf;
+        fastcgi_buffers 1024 4k;
+        fastcgi_buffer_size 128k;
+    }
+
+    gzip on;
+    gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
+    gzip_proxied any;
+
+    location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
+        access_log off;
+        log_not_found off;
+        expires 360d;
     }
 
     location ~ /\.ht {
