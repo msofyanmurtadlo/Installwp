@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Function to install a package silently and show progress bar
+# Function to install packages silently and show progress bar
 install_with_progress() {
-    echo "Installing $1..."
-    sudo apt install -y "$1" &>/dev/null &
+    echo "Installing necessary packages..."
+    sudo apt install -y "$@" &>/dev/null &
     progress_bar
-    echo -e "\e[1;32m$1 installed successfully.\e[0m"
+    echo -e "\e[1;32mPackages installed successfully.\e[0m"
 }
 
 # Function to show a progress bar for installation
@@ -80,31 +80,17 @@ echo "Updating package lists..."
 sudo apt update &>/dev/null
 
 # Install necessary software packages with progress bar
-install_with_progress nginx
-install_with_progress software-properties-common
-install_with_progress unzip
-install_with_progress mariadb-server
-install_with_progress mariadb-client
+install_with_progress nginx software-properties-common unzip mariadb-server mariadb-client
+
+# Allow Nginx through UFW
 ufw allow 'Nginx Full' &>/dev/null
 
-# Install PHP 8.1 and required extensions
-install_with_progress php8.1-fpm
-install_with_progress php8.1-common
-install_with_progress php8.1-dom
-install_with_progress php8.1-intl
-install_with_progress php8.1-mysql
-install_with_progress php8.1-xml
-install_with_progress php8.1-xmlrpc
-install_with_progress php8.1-curl
-install_with_progress php8.1-gd
-install_with_progress php8.1-imagick
-install_with_progress php8.1-cli
-install_with_progress php8.1-dev
-install_with_progress php8.1-imap
-install_with_progress php8.1-mbstring
-install_with_progress php8.1-soap
-install_with_progress php8.1-zip
-install_with_progress php8.1-bcmath
+echo "Adding PHP repository..."
+sudo add-apt-repository ppa:ondrej/php -y &>/dev/null
+sudo apt update &>/dev/null
+
+# Install PHP 8.1 and required extensions in one command
+install_with_progress php8.1-fpm php8.1-common php8.1-dom php8.1-intl php8.1-mysql php8.1-xml php8.1-xmlrpc php8.1-curl php8.1-gd php8.1-imagick php8.1-cli php8.1-dev php8.1-imap php8.1-mbstring php8.1-soap php8.1-zip php8.1-bcmath
 
 # Prompt for domain and database details
 echo -e "\n\e[1;34mEnter your domain (e.g. example.com):\e[0m"
@@ -184,6 +170,9 @@ server {
     }
 
     gzip on;
+    gzip_vary on;
+    gzip_min_length 1000;
+    gzip_comp_level 5;
     gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
     gzip_proxied any;
 
