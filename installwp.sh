@@ -1,26 +1,47 @@
 #!/bin/bash
 
+# Install dialog untuk UI yang lebih interaktif
+sudo apt install -y dialog
+
+# Fungsi untuk menampilkan progress
+progress_bar() {
+    (
+    for i in {1..100}; do
+        echo $i
+        sleep 0.05
+    done
+    ) | dialog --gauge "Installing Packages" 10 70 0
+}
+
+# Fungsi untuk menampilkan pesan konfirmasi
+info_message() {
+    dialog --msgbox "$1" 10 50
+}
+
+# Menyembunyikan proses awal dengan progress bar
+progress_bar
+
+# Enable firewall and allow SSH
 ufw enable
 ufw allow ssh
 
+# Installing required packages
 sudo apt update
 sudo apt install -y nginx software-properties-common unzip mariadb-server mariadb-client
 ufw allow 'Nginx Full'
 
+# Installing PHP 8.4 and related extensions
 sudo add-apt-repository ppa:ondrej/php -y
 sudo apt update
 sudo apt install -y php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath
 
-echo "Enter your domain (e.g. example.com):"
-read domain
-echo "Enter the name of your database:"
-read dbname
-echo "Enter your database username:"
-read dbuser
-echo "Enter your database password:"
-read dbpass
+# Prompt for domain and database details
+domain=$(dialog --inputbox "Enter your domain (e.g. example.com):" 8 40 3>&1 1>&2 2>&3)
+dbname=$(dialog --inputbox "Enter the name of your database:" 8 40 3>&1 1>&2 2>&3)
+dbuser=$(dialog --inputbox "Enter your database username:" 8 40 3>&1 1>&2 2>&3)
+dbpass=$(dialog --passwordbox "Enter your database password:" 8 40 3>&1 1>&2 2>&3)
 
-
+# Create database and user
 sudo mariadb <<EOF
 CREATE DATABASE ${dbname};
 CREATE USER ${dbuser}@localhost IDENTIFIED BY '${dbpass}';
@@ -30,13 +51,14 @@ FLUSH PRIVILEGES;
 EXIT;
 EOF
 
+# Create the WordPress directory and download files
 mkdir -p /var/www/${domain}
 cd /var/www/${domain}
-
 wget https://wordpress.org/latest.zip -O wordpress.zip
 unzip wordpress.zip
 rm wordpress.zip
 
+# Configure Nginx
 sudo tee /etc/nginx/sites-available/${domain} <<EOF
 server {
     listen 80;
@@ -101,24 +123,31 @@ server {
 }
 EOF
 
+# Create symbolic link to enable site
 sudo ln -s /etc/nginx/sites-available/${domain} /etc/nginx/sites-enabled/
 
+# Create SSL directory
 mkdir /etc/ssl/${domain}
 
-echo "Please make sure to upload your certificate to /etc/ssl/${domain}/cert.pem"
-echo "and your private key to /etc/ssl/${domain}/key.pem"
-read -n 1 -s -r -p "Press any key when you're ready..."
+# Show message to user to upload certificates
+info_message "Please upload your certificate to /etc/ssl/${domain}/cert.pem and your private key to /etc/ssl/${domain}/key.pem. Press any key when you're ready..."
 
+# User will upload the cert.pem and key.pem files
 sudo nano /etc/ssl/${domain}/cert.pem
 sudo nano /etc/ssl/${domain}/key.pem
 
+# Set file permissions
 sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
 sudo chmod 755 /var/www/${domain}/wordpress/wp-content
 
+# Modify Nginx configuration for limits and timeouts
 sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;\n\ \ \ \ limit_conn_zone \$binary_remote_addr zone=addr:10m;\n\ \ \ \ client_body_timeout 10s;\n\ \ \ \ client_header_timeout 10s;\n\ \ \ \ send_timeout 10s;' /etc/nginx/nginx.conf
 
+# Restart Nginx
 sudo systemctl restart nginx
 
-curl -I http://www.${domain}
+# Perform curl and display the result in a dialog box
+http_response=$(curl -I http://www.${domain} 2>/dev/null | dialog --stdout --title "HTTP Response" --msgbox "$(curl -I http://www.${domain} 2>/dev/null)" 15 70)
 
-echo "WordPress installation completed. Please visit http://${domain} to access your WordPress website."
+# Show message confirming the completion
+info_message "WordPress installation completed. Please visit http://${domain} to access your WordPress website."
