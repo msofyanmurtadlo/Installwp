@@ -128,7 +128,7 @@ sudo tee /etc/nginx/sites-available/${domain} &>/dev/null <<EOF
 server {
     listen 80;
     listen [::]:80;
-
+  
     # SSL configuration
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
