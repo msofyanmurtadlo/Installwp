@@ -12,9 +12,6 @@ read -s dbpass
 ufw enable
 ufw allow ssh
 
-sudo apt install nginx -y
-sudo ufw allow 'Nginx Full'
-
 # Install dependencies untuk PHP dan FrankenPHP
 sudo apt-get install software-properties-common -y
 sudo apt-get install apt-transport-https ca-certificates lsb-release curl -y
@@ -110,10 +107,6 @@ EOF
 
 # SSL Configuration
 sudo mkdir /etc/ssl/${domain}
-echo "Masukkan sertifikat SSL Anda (paste konten cert.pem):"
-sudo nano /etc/ssl/${domain}/cert.pem
-echo "Masukkan key SSL Anda (paste konten key.pem):"
-sudo nano /etc/ssl/${domain}/key.pem
 
 # Menambahkan konfigurasi SSL pada Nginx
 sudo tee -a /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
