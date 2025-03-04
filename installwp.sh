@@ -131,6 +131,8 @@ EOF
 
 sudo ln -s /etc/nginx/sites-available/${domain}.conf /etc/nginx/sites-enabled/
 
+sudo sed -i '/http {/a \\n    limit_req_zone $binary_remote_addr zone=mylimit:10m rate=10r/s;\n    limit_conn_zone $binary_remote_addr zone=addr:10m;\n    client_body_timeout   10s;\n    client_header_timeout 10s;\n    keepalive_timeout     10s;\n    send_timeout          10s;\n' /etc/nginx/nginx.conf
+
 sudo apt install -y certbot python3-certbot-nginx
 
 sudo certbot --nginx --agree-tos --redirect --email admin@${domain} -d ${domain},www.${domain}
