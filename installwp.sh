@@ -149,7 +149,7 @@ server {
     }
 
     location ~ ^/wp-json/ {
-        rewrite ^/wp-json/(.*?)$ /?rest_route=/$1 last;
+        rewrite ^/wp-json/(.*?)$ /?rest_route=/\$1 last;
     }
 
     location ~* /wp-sitemap.*\.xml {
