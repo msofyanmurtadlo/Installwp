@@ -15,16 +15,20 @@ ufw allow ssh
 sudo apt install nginx -y
 sudo ufw allow 'Nginx Full'
 
+# Install dependencies untuk PHP dan FrankenPHP
 sudo apt-get install software-properties-common -y
 sudo apt-get install apt-transport-https ca-certificates lsb-release curl -y
 
+# Menambahkan FrankenPHP repository untuk PHP 8.4
 echo "deb https://deb.php.frankenphp.dev $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/frankenphp.list
 curl -fsSL https://packages.frankenphp.dev/KEY.gpg | sudo gpg --dearmor -o /usr/share/keyrings/frankenphp.gpg
 sudo apt-get update
 sudo apt-get install frankenphp -y
 
+# Install MariaDB
 sudo apt install -y mariadb-server mariadb-client
 
+# Setup database untuk WordPress
 sudo mariadb <<EOF
 CREATE DATABASE ${dbname};
 CREATE USER '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';
@@ -34,6 +38,7 @@ FLUSH PRIVILEGES;
 EXIT;
 EOF
 
+# Install dan setup WordPress
 sudo mkdir -p /var/www/${domain}
 cd /var/www/${domain}
 wget https://wordpress.org/latest.zip
@@ -41,6 +46,7 @@ sudo apt install zip -y
 unzip latest.zip
 rm -r latest.zip
 
+# Konfigurasi Nginx untuk WordPress
 sudo tee /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
 server {
   listen 80;
@@ -102,10 +108,14 @@ server {
 }
 EOF
 
+# SSL Configuration
 sudo mkdir /etc/ssl/${domain}
+echo "Masukkan sertifikat SSL Anda (paste konten cert.pem):"
 sudo nano /etc/ssl/${domain}/cert.pem
+echo "Masukkan key SSL Anda (paste konten key.pem):"
 sudo nano /etc/ssl/${domain}/key.pem
 
+# Menambahkan konfigurasi SSL pada Nginx
 sudo tee -a /etc/nginx/sites-available/${domain}.conf > /dev/null <<EOF
 listen 443 ssl http2;
 listen [::]:443 ssl http2;
@@ -113,11 +123,14 @@ ssl_certificate         /etc/ssl/${domain}/cert.pem;
 ssl_certificate_key     /etc/ssl/${domain}/key.pem;
 EOF
 
+# Set permissions untuk WordPress
 sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
 sudo chmod 755 /var/www/${domain}/wordpress/wp-content
 
+# Install Fail2Ban untuk perlindungan
 sudo apt install fail2ban -y
 
+# Konfigurasi Fail2Ban
 sudo tee /etc/fail2ban/jail.local > /dev/null <<EOF
 [sshd]
 enabled  = true
@@ -138,8 +151,10 @@ failregex = .*authentication failure.*OR.*login failed.*
 ignoreregex =
 EOF
 
-sudo apt-get install libnginx-mod-security -y
+# Install ModSecurity
+sudo apt-get install -y libnginx-mod-http-modsecurity
 
+# Aktifkan ModSecurity di Nginx
 sudo tee -a /etc/nginx/nginx.conf > /dev/null <<EOF
 modsecurity on;
 modsecurity_rules_file /etc/nginx/modsec/main.conf;
@@ -151,6 +166,7 @@ client_header_timeout 10s;
 send_timeout          10s;
 EOF
 
+# Restart layanan
 sudo service nginx restart
 sudo service fail2ban restart
 
