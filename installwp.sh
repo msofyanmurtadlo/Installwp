@@ -2,10 +2,10 @@
 
 ufw enable
 ufw allow ssh
-ufw allow 'Nginx Full'
 
 sudo apt update
 sudo apt install -y nginx software-properties-common unzip mariadb-server mariadb-client
+ufw allow 'Nginx Full'
 
 sudo add-apt-repository ppa:ondrej/php -y
 sudo apt update
