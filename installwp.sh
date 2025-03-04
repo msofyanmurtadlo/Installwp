@@ -127,6 +127,7 @@ server {
 }
 EOF
 
+mkdir /etc/ssl/${domain}
 # Step 14 - SSL Configuration (if using SSL)
 echo "You can now edit your SSL certificate and key using nano."
 echo "Please make sure to copy your certificate to /etc/ssl/${domain}/cert.pem"
