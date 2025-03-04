@@ -97,6 +97,7 @@ server {
 EOF
 
 sudo ln -s /etc/nginx/sites-available/$domain /etc/nginx/sites-enabled/
+sudo mkdir /etc/ssl/$domain
 
 sudo tee -a /etc/nginx/sites-available/$domain <<EOF
 # SSL configuration
