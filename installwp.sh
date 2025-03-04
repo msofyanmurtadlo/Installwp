@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Function to install a package silently and only show success
+install_silently() {
+    sudo apt install -y "$1" &>/dev/null && echo -e "\e[1;32m$1 installed successfully.\e[0m"
+}
+
 # Function for showing a spinner during long operations
 spinner() {
     local pid=$!
@@ -22,20 +27,40 @@ spinner() {
 echo -e "\n\e[1;32mStarting WordPress Installation...\e[0m\n"
 
 # Enable firewall and allow SSH
-echo "Enabling firewall and allowing SSH..."
-ufw enable & spinner
+ufw enable &>/dev/null
+ufw allow ssh &>/dev/null
 
-# Install necessary packages
-echo "Updating packages and installing dependencies..."
-sudo apt update & spinner
-sudo apt install -y nginx software-properties-common unzip mariadb-server mariadb-client & spinner
-ufw allow 'Nginx Full' & spinner
+# Update packages and install required software
+echo "Installing required software..."
+sudo apt update &>/dev/null
+install_silently nginx
+install_silently software-properties-common
+install_silently unzip
+install_silently mariadb-server
+install_silently mariadb-client
+ufw allow 'Nginx Full' &>/dev/null
 
 # Install PHP 8.4
-echo "Installing PHP 8.4 and necessary PHP extensions..."
-sudo add-apt-repository ppa:ondrej/php -y & spinner
-sudo apt update & spinner
-sudo apt install -y php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath & spinner
+echo "Installing PHP 8.4..."
+sudo add-apt-repository ppa:ondrej/php -y &>/dev/null
+sudo apt update &>/dev/null
+install_silently php8.4-fpm
+install_silently php8.4-common
+install_silently php8.4-dom
+install_silently php8.4-intl
+install_silently php8.4-mysql
+install_silently php8.4-xml
+install_silently php8.4-xmlrpc
+install_silently php8.4-curl
+install_silently php8.4-gd
+install_silently php8.4-imagick
+install_silently php8.4-cli
+install_silently php8.4-dev
+install_silently php8.4-imap
+install_silently php8.4-mbstring
+install_silently php8.4-soap
+install_silently php8.4-zip
+install_silently php8.4-bcmath
 
 # Prompt for domain and database details
 echo -e "\n\e[1;34mEnter your domain (e.g. example.com):\e[0m"
@@ -48,8 +73,8 @@ echo -e "\n\e[1;34mEnter your database password:\e[0m"
 read -s dbpass
 
 # Create database and user
-echo "Creating the database and user..."
-sudo mariadb <<EOF & spinner
+echo "Setting up database..."
+sudo mariadb <<EOF &>/dev/null
 CREATE DATABASE ${dbname};
 CREATE USER ${dbuser}@localhost IDENTIFIED BY '${dbpass}';
 GRANT ALL PRIVILEGES ON ${dbname}.* TO ${dbuser}@localhost;
@@ -60,15 +85,15 @@ EOF
 
 # Download and set up WordPress
 echo "Setting up WordPress..."
-mkdir -p /var/www/${domain} & spinner
+mkdir -p /var/www/${domain} &>/dev/null
 cd /var/www/${domain}
-wget https://wordpress.org/latest.zip -O wordpress.zip & spinner
-unzip wordpress.zip & spinner
-rm wordpress.zip & spinner
+wget -q https://wordpress.org/latest.zip -O wordpress.zip &>/dev/null
+unzip -q wordpress.zip &>/dev/null
+rm -f wordpress.zip &>/dev/null
 
 # Configure Nginx for the domain
-echo "Configuring Nginx for the domain..."
-sudo tee /etc/nginx/sites-available/${domain} <<EOF & spinner
+echo "Configuring Nginx..."
+sudo tee /etc/nginx/sites-available/${domain} &>/dev/null <<EOF
 server {
     listen 80;
     listen [::]:80;
@@ -133,8 +158,8 @@ server {
 EOF
 
 # Enable the site and create SSL directory
-sudo ln -s /etc/nginx/sites-available/${domain} /etc/nginx/sites-enabled/ & spinner
-mkdir /etc/ssl/${domain} & spinner
+sudo ln -s /etc/nginx/sites-available/${domain} /etc/nginx/sites-enabled/ &>/dev/null
+mkdir /etc/ssl/${domain} &>/dev/null
 
 # User prompt for SSL certificates
 echo -e "\n\e[1;33mPlease upload your certificate to /etc/ssl/${domain}/cert.pem and your private key to /etc/ssl/${domain}/key.pem.\e[0m"
@@ -147,16 +172,16 @@ sudo nano /etc/ssl/${domain}/key.pem
 
 # Set correct permissions
 echo "Setting permissions for WordPress files..."
-sudo chown -R www-data:www-data /var/www/${domain}/wordpress/ & spinner
-sudo chmod 755 /var/www/${domain}/wordpress/wp-content & spinner
+sudo chown -R www-data:www-data /var/www/${domain}/wordpress/ &>/dev/null
+sudo chmod 755 /var/www/${domain}/wordpress/wp-content &>/dev/null
 
 # Modify Nginx configuration for security limits
 echo "Modifying Nginx configuration for rate limiting and timeouts..."
-sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;\n\ \ \ \ limit_conn_zone \$binary_remote_addr zone=addr:10m;\n\ \ \ \ client_body_timeout 10s;\n\ \ \ \ client_header_timeout 10s;\n\ \ \ \ send_timeout 10s;' /etc/nginx/nginx.conf & spinner
+sudo sed -i '/http {/a \ \ \ \ limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;\n\ \ \ \ limit_conn_zone \$binary_remote_addr zone=addr:10m;\n\ \ \ \ client_body_timeout 10s;\n\ \ \ \ client_header_timeout 10s;\n\ \ \ \ send_timeout 10s;' /etc/nginx/nginx.conf &>/dev/null
 
 # Restart Nginx
 echo "Restarting Nginx..."
-sudo systemctl restart nginx & spinner
+sudo systemctl restart nginx &>/dev/null
 
 # Perform curl request and display response headers in terminal
 echo -e "\n\e[1;32mChecking the HTTP response headers...\e[0m"
