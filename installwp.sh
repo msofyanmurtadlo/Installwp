@@ -77,7 +77,7 @@ sudo systemctl reload fail2ban &>/dev/null
 
 # Update packages
 echo "Updating package lists..."
-sudo apt update &>/dev/null
+sudo apt update -y &>/dev/null
 
 # Install necessary software packages with progress bar
 install_with_progress nginx software-properties-common unzip mariadb-server mariadb-client
@@ -88,7 +88,7 @@ ufw allow 'Nginx Full' &>/dev/null
 # Adding PHP repository
 echo "Adding PHP repository..."
 sudo add-apt-repository ppa:ondrej/php -y &>/dev/null
-sudo apt update &>/dev/null
+sudo apt update -y &>/dev/null
 
 # Install PHP 8.4 and required extensions in one command
 install_with_progress php8.4-fpm php8.4-common php8.4-dom php8.4-intl php8.4-mysql php8.4-xml php8.4-xmlrpc php8.4-curl php8.4-gd php8.4-imagick php8.4-cli php8.4-dev php8.4-imap php8.4-mbstring php8.4-soap php8.4-zip php8.4-bcmath -y
