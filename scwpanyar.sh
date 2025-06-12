@@ -189,7 +189,7 @@ install_wordpress() {
     sudo ufw allow 'Nginx Full' > /dev/null
     
     # Instal paket yang diperlukan
-    install_with_progress nginx mariadb-server php8.4-fpm php8.4-common php8.4-mysql php8.4-gd php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip php8.4-bcmath php8.4-soap php8.4-intl php8.4-imagick fail2ban certbot python3-certbot-nginx
+    nginx install_with_progress mariadb-server php8.4-fpm php8.4-common php8.4-mysql php8.4-gd php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip php8.4-bcmath php8.4-soap php8.4-intl php8.4-imagick fail2ban certbot python3-certbot-nginx
     
     # Konfigurasi MariaDB
     echo -e "\n${BIRU}Mengkonfigurasi MariaDB...${NC}"
