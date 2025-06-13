@@ -1,404 +1,345 @@
 #!/bin/bash
 
-# Warna untuk output
-MERAH='\033[0;31m'
+BIRU_TUA='\033[0;34m'
+BIRU_MUDA='\033[1;36m'
 HIJAU='\033[0;32m'
 KUNING='\033[1;33m'
-BIRU='\033[0;34m'
-NC='\033[0m' # No Color
+MERAH='\033[0;31m'
+NC='\033[0m'
 
-# Fungsi untuk menginstal paket secara diam dan menampilkan progress
-install_with_progress() {
-    echo -e "${BIRU}Menginstal paket: $@${NC}"
-    sudo apt-get install -y "$@" > /dev/null 2>&1 &
-    local pid=$!
-    local spin='-\|/'
-    local i=0
-    while kill -0 $pid 2>/dev/null; do
-        i=$(( (i+1) %4 ))
-        printf "\r[${spin:$i:1}] Sedang menginstal..."
-        sleep 0.1
-    done
-    printf "\r${HIJAU}✓ Paket berhasil diinstal.${NC}\n"
+tampilkan_header() {
+    clear
+    echo -e "${BIRU_TUA}"
+    echo "============================================================"
+    echo "                      ishowpen                               "
+    echo "============================================================"
+    echo -e "${NC}"
+    echo -e "${KUNING}Pemasangan WordPress Otomatis${NC}"
 }
 
-# Fungsi untuk memvalidasi domain
-validate_domain() {
-    local domain=$1
-    if [[ ! $domain =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$ ]]; then
-        echo -e "${MERAH}Error: Format domain tidak valid${NC}"
+pesan_status() {
+    echo -e "${BIRU_TUA}[STATUS] $1${NC}"
+}
+
+pesan_sukses() {
+    echo -e "${HIJAU}[SUKSES] $1${NC}"
+}
+
+pesan_peringatan() {
+    echo -e "${KUNING}[PERINGATAN] $1${NC}"
+}
+
+pesan_kesalahan() {
+    echo -e "${MERAH}[KESALAHAN] $1${NC}" >&2
+}
+
+pasang_paket() {
+    sudo apt-get update > /dev/null
+    sudo apt-get install -y "$@" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        pesan_sukses "Paket berhasil dipasang"
+        return 0
+    else
+        pesan_kesalahan "Gagal memasang paket"
         return 1
     fi
-    return 0
 }
 
-# Fungsi untuk setup SSL dengan pilihan
-setup_ssl() {
-    local domain=$1
-    
-    echo -e "\n${BIRU}Mengatur SSL untuk ${domain}${NC}"
-    echo -e "Pilih metode setup SSL:"
-    echo -e "1) Gunakan Certbot (Let's Encrypt)"
-    echo -e "2) Upload sertifikat manual dari Cloudflare Origin Server"
-    echo -e "3) Gunakan self-signed certificate"
-    read -p "Pilihan Anda [1-3]: " ssl_choice
+validasi_domain() {
+    local regex_domain='^([a-zA-Z0-9][a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$'
+    [[ $1 =~ $regex_domain ]] && return 0
+    pesan_kesalahan "Format domain tidak valid: $1"
+    return 1
+}
 
-    case $ssl_choice in
+hasilkan_kredensial_db() {
+    db_name="wp_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8)"
+    db_user="wp_user_$(tr -dc 'a-z0-9' < /dev/urandom | head -c 8)"
+    db_pass=$(tr -dc 'A-Za-z0-9!@#$%^&*()_+' < /dev/urandom | head -c 32)
+    echo -e "\n${HIJAU}Kredensial database:${NC}"
+    echo -e "Database: ${BIRU_MUDA}$db_name${NC}"
+    echo -e "Pengguna: ${BIRU_MUDA}$db_user${NC}"
+    echo -e "Kata Sandi: ${BIRU_MUDA}$db_pass${NC}\n"
+}
+
+konfigurasi_php() {
+    local php_ini="/etc/php/8.1/fpm/php.ini"
+    sudo cp $php_ini "$php_ini.bak"
+    declare -A settings=(
+        ["max_execution_time"]="180"
+        ["memory_limit"]="256M"
+        ["upload_max_filesize"]="128M"
+        ["post_max_size"]="160M"
+        ["max_input_vars"]="5000"
+        ["opcache.enable"]="1"
+        ["opcache.memory_consumption"]="256"
+        ["opcache.interned_strings_buffer"]="32"
+        ["opcache.max_accelerated_files"]="20000"
+        ["opcache.validate_timestamps"]="0"
+        ["opcache.save_comments"]="1"
+        ["max_input_time"]="180"
+    )
+    for key in "${!settings[@]}"; do
+        sudo sed -i "s/^;*$key\s*=.*/$key = ${settings[$key]}/" $php_ini
+    done
+    sudo sed -i "s/^;cgi.fix_pathinfo=.*/cgi.fix_pathinfo=0/" $php_ini
+    sudo sed -i "s/^expose_php=.*/expose_php=Off/" $php_ini
+    sudo systemctl restart php8.1-fpm
+    pesan_sukses "PHP 8.1 dioptimasi"
+}
+
+konfigurasi_mariadb() {
+    sudo mysql -e "CREATE DATABASE IF NOT EXISTS $db_name CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    sudo mysql -e "CREATE USER IF NOT EXISTS '$db_user'@'localhost' IDENTIFIED BY '$db_pass';"
+    sudo mysql -e "GRANT ALL PRIVILEGES ON $db_name.* TO '$db_user'@'localhost';"
+    sudo mysql -e "FLUSH PRIVILEGES;"
+    pesan_sukses "Database dibuat"
+}
+
+pasang_file_wordpress() {
+    sudo mkdir -p /var/www/$1
+    cd /var/www/$1
+    sudo wget -q https://id.wordpress.org/latest-id_ID.tar.gz
+    sudo tar xzf latest-id_ID.tar.gz --strip-components=1
+    sudo rm latest-id_ID.tar.gz
+    sudo chown -R www-data:www-data .
+    sudo find . -type d -exec chmod 755 {} \;
+    sudo find . -type f -exec chmod 644 {} \;
+    sudo mkdir -p wp-content/uploads
+    sudo chmod 775 wp-content/uploads
+    pesan_sukses "WordPress terpasang"
+}
+
+konfigurasi_wp_config() {
+    cd /var/www/$1
+    sudo cp wp-config-sample.php wp-config.php
+    sudo sed -i "s/database_name_here/$db_name/" wp-config.php
+    sudo sed -i "s/username_here/$db_user/" wp-config.php
+    sudo sed -i "s/password_here/$db_pass/" wp-config.php
+    sudo curl -s https://api.wordpress.org/secret-key/1.1/salt/ >> wp-config.php
+    cat << 'EOF' | sudo tee -a wp-config.php > /dev/null
+define('DISALLOW_FILE_EDIT', true);
+define('FORCE_SSL_ADMIN', true);
+define('WP_AUTO_UPDATE_CORE', 'minor');
+define('WP_MEMORY_LIMIT', '256M');
+define('WP_MAX_MEMORY_LIMIT', '256M');
+define('WP_CACHE', true);
+define('WP_DEBUG', false);
+define('WP_HOME', 'https://$domain');
+define('WP_SITEURL', 'https://$domain');
+define('RANK_MATH_DEBUG', false);
+define('RELEVANSSI_HIGHLIGHT', true);
+define('POST_VIEWS_COUNTER_DEBUG', false);
+define('FM_DISABLE_OVERWRITE', true);
+function set_permalink_structure() {
+    global $wp_rewrite;
+    $wp_rewrite->set_permalink_structure('/%postname%/');
+    $wp_rewrite->flush_rules();
+}
+add_action('init', 'set_permalink_structure');
+EOF
+    sudo sed -i "s/\$domain/$1/" wp-config.php
+    pesan_sukses "wp-config dioptimasi"
+}
+
+pasang_ssl() {
+    case $1 in
         1)
-            # Izinkan HTTP sementara untuk challenge Certbot
-            sudo ufw allow 80/tcp > /dev/null
-            
-            # Hentikan Nginx sementara untuk mode standalone Certbot
-            sudo systemctl stop nginx > /dev/null
-            
-            # Dapatkan sertifikat SSL
-            if sudo certbot certonly --standalone --agree-tos --no-eff-email --email admin@${domain} -d ${domain} -d www.${domain} > /dev/null 2>&1; then
-                echo -e "${HIJAU}✓ Sertifikat SSL berhasil didapatkan${NC}"
-                
-                # Buat symlink ke path SSL standar
-                sudo mkdir -p /etc/ssl/${domain} > /dev/null
-                sudo ln -sf /etc/letsencrypt/live/${domain}/fullchain.pem /etc/ssl/${domain}/cert.pem
-                sudo ln -sf /etc/letsencrypt/live/${domain}/privkey.pem /etc/ssl/${domain}/key.pem
-                
-                # Setup pembaruan otomatis
-                (sudo crontab -l 2>/dev/null; echo "0 3 * * * /usr/bin/certbot renew --quiet --post-hook \"systemctl reload nginx\"") | sudo crontab -
-                
-                return 0
-            else
-                echo -e "${KUNING}Certbot gagal, kembali ke menu pilihan SSL${NC}"
-                setup_ssl "$domain"
-            fi
+            sudo certbot --nginx -d $2 -d www.$2 --non-interactive --agree-tos --email admin@$2 > /dev/null 2>&1 || \
+            sudo certbot certonly --standalone -d $2 -d www.$2 --non-interactive --agree-tos --email admin@$2
+            (sudo crontab -l 2>/dev/null; echo "0 3 * * * /usr/bin/certbot renew --quiet --post-hook \"systemctl reload nginx\"") | sudo crontab -
+            pesan_sukses "SSL Let's Encrypt terpasang"
             ;;
         2)
-            # Upload sertifikat manual dari Cloudflare
-            echo -e "\n${BIRU}Mengunggah sertifikat Cloudflare Origin Server${NC}"
-            
-            # Buat direktori untuk SSL
-            sudo mkdir -p /etc/ssl/${domain} > /dev/null
-            
-            # Buat file key.pem
-            echo -e "${KUNING}Membuka editor nano untuk membuat key.pem${NC}"
-            echo -e "${BIRU}Salin dan tempelkan konten private key dari Cloudflare (Origin Certificate), lalu simpan (Ctrl+O, Enter, Ctrl+X)${NC}"
-            sudo nano /etc/ssl/${domain}/key.pem
-            
-            # Validasi key.pem
-            if ! sudo openssl rsa -in /etc/ssl/${domain}/key.pem -check > /dev/null 2>&1; then
-                echo -e "${MERAH}Error: Invalid private key format${NC}"
-                return 1
+            sudo mkdir -p /etc/ssl/$2
+            echo -e "${KUNING}Buat file SSL di /etc/ssl/$2 (key.pem dan cert.pem), lalu tekan Enter...${NC}"
+            read
+            if [[ ! -f /etc/ssl/$2/key.pem ]]; then
+                pesan_kesalahan "File SSL tidak ada, gunakan self-signed"
+                pasang_ssl 3 $2
             fi
-            
-            # Buat file cert.pem
-            echo -e "${KUNING}Membuka editor nano untuk membuat cert.pem${NC}"
-            echo -e "${BIRU}Salin dan tempelkan konten certificate dari Cloudflare (Origin Certificate), lalu simpan (Ctrl+O, Enter, Ctrl+X)${NC}"
-            sudo nano /etc/ssl/${domain}/cert.pem
-            
-            # Validasi cert.pem
-            if ! sudo openssl x509 -in /etc/ssl/${domain}/cert.pem -text -noout > /dev/null 2>&1; then
-                echo -e "${MERAH}Error: Invalid certificate format${NC}"
-                return 1
-            fi
-            
-            echo -e "${HIJAU}✓ Sertifikat Cloudflare berhasil diunggah${NC}"
-            return 0
             ;;
         3)
-            # Buat sertifikat self-signed
-            echo -e "\n${KUNING}Membuat sertifikat self-signed${NC}"
-            
-            # Buat direktori untuk SSL
-            sudo mkdir -p /etc/ssl/${domain} > /dev/null
-            
-            # Generate sertifikat self-signed
-            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-                -keyout /etc/ssl/${domain}/key.pem \
-                -out /etc/ssl/${domain}/cert.pem \
-                -subj "/CN=${domain}" > /dev/null 2>&1
-                
-            echo -e "${HIJAU}✓ Sertifikat self-signed berhasil dibuat${NC}"
-            return 0
+            sudo mkdir -p /etc/ssl/$2
+            sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout /etc/ssl/$2/key.pem -out /etc/ssl/$2/cert.pem \
+                -subj "/CN=$2" > /dev/null 2>&1
+            pesan_sukses "SSL Self-Signed dibuat"
             ;;
         *)
-            echo -e "${MERAH}Pilihan tidak valid, menggunakan Certbot sebagai default${NC}"
-            setup_ssl "$domain"
+            pasang_ssl 1 $2
             ;;
     esac
 }
 
-# Fungsi untuk mengkonfigurasi WordPress
-configure_wordpress() {
-    local domain=$1
-    local dbname=$2
-    local dbuser=$3
-    local dbpass=$4
+buat_konfigurasi_nginx() {
+    local ssl_cert="/etc/letsencrypt/live/$1/fullchain.pem"
+    local ssl_key="/etc/letsencrypt/live/$1/privkey.pem"
     
-    echo -e "\n${BIRU}Mengkonfigurasi WordPress untuk ${domain}${NC}"
+    if [[ $2 -eq 2 ]]; then
+        ssl_cert="/etc/ssl/$1/cert.pem"
+        ssl_key="/etc/ssl/$1/key.pem"
+    elif [[ $2 -eq 3 ]]; then
+        ssl_cert="/etc/ssl/$1/cert.pem"
+        ssl_key="/etc/ssl/$1/key.pem"
+    fi
     
-    # Buat wp-config.php
-    cp /var/www/${domain}/wordpress/wp-config-sample.php /var/www/${domain}/wordpress/wp-config.php
-    
-    # Set detail database
-    sed -i "s/database_name_here/${dbname}/" /var/www/${domain}/wordpress/wp-config.php
-    sed -i "s/username_here/${dbuser}/" /var/www/${domain}/wordpress/wp-config.php
-    sed -i "s/password_here/${dbpass}/" /var/www/${domain}/wordpress/wp-config.php
-    
-    # Generate kunci keamanan
-    SALT=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
-    sed -i "/AUTH_KEY/s/put your unique phrase here/$SALT/" /var/www/${domain}/wordpress/wp-config.php
-    
-    # Set permission file
-    sudo chown -R www-data:www-data /var/www/${domain}/wordpress/
-    sudo find /var/www/${domain}/wordpress/ -type d -exec chmod 750 {} \;
-    sudo find /var/www/${domain}/wordpress/ -type f -exec chmod 640 {} \;
-}
-
-# Fungsi instalasi utama
-install_wordpress() {
-    # Tampilkan pesan selamat datang
-    echo -e "\n${HIJAU}=== Skrip Instalasi WordPress ===${NC}"
-    echo -e "Skrip ini akan menginstal WordPress dengan Nginx, MariaDB, dan PHP 8.4\n"
-    
-    # Meminta input domain
-    while true; do
-        read -p "Masukkan domain Anda (contoh: contoh.com): " domain
-        if validate_domain "$domain"; then
-            break
-        fi
-    done
-    
-    # Meminta detail database
-    read -p "Masukkan nama database: " dbname
-    read -p "Masukkan username database: " dbuser
-    while true; do
-        read -s -p "Masukkan password database: " dbpass
-        echo
-        if [ -z "$dbpass" ]; then
-            echo -e "${MERAH}Error: Password tidak boleh kosong${NC}"
-        else
-            break
-        fi
-    done
-    
-    # Update sistem
-    echo -e "\n${BIRU}Memperbarui daftar paket...${NC}"
-    sudo apt-get update > /dev/null
-    
-    # Aktifkan dan konfigurasi UFW
-    echo -e "\n${BIRU}Mengkonfigurasi firewall UFW...${NC}"
-    sudo ufw --force enable > /dev/null
-    sudo ufw allow ssh > /dev/null
-    sudo ufw allow 'Nginx Full' > /dev/null
-    
-    # Instal paket yang diperlukan
-    nginx install_with_progress mariadb-server php8.4-fpm php8.4-common php8.4-mysql php8.4-gd php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip php8.4-bcmath php8.4-soap php8.4-intl php8.4-imagick fail2ban certbot python3-certbot-nginx
-    
-    # Konfigurasi MariaDB
-    echo -e "\n${BIRU}Mengkonfigurasi MariaDB...${NC}"
-    sudo mysql -e "CREATE DATABASE IF NOT EXISTS ${dbname};"
-    sudo mysql -e "CREATE USER IF NOT EXISTS '${dbuser}'@'localhost' IDENTIFIED BY '${dbpass}';"
-    sudo mysql -e "GRANT ALL PRIVILEGES ON ${dbname}.* TO '${dbuser}'@'localhost';"
-    sudo mysql -e "FLUSH PRIVILEGES;"
-    
-    # Download dan ekstrak WordPress
-    echo -e "\n${BIRU}Mengunduh WordPress...${NC}"
-    sudo mkdir -p /var/www/${domain} > /dev/null
-    cd /var/www/${domain}
-    sudo wget -q https://wordpress.org/latest.tar.gz
-    sudo tar -xzf latest.tar.gz
-    sudo rm latest.tar.gz
-    
-    # Konfigurasi WordPress
-    configure_wordpress "$domain" "$dbname" "$dbuser" "$dbpass"
-    
-    # Setup SSL dengan pilihan
-    setup_ssl "$domain"
-    
-    # Buat konfigurasi Nginx dengan optimasi RankMath SEO
-    echo -e "\n${BIRU}Membuat konfigurasi Nginx dengan optimasi RankMath SEO...${NC}"
-    sudo tee /etc/nginx/sites-available/${domain} > /dev/null <<EOF
+    sudo tee /etc/nginx/sites-available/$1 > /dev/null <<EOF
 server {
     listen 80;
-    server_name ${domain} www.${domain};
-    return 301 https://\$server_name\$request_uri;
+    server_name $1 www.$1;
+    return 301 https://\$host\$request_uri;
 }
-
 server {
     listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    
-    server_name ${domain} www.${domain};
-    
-    ssl_certificate /etc/ssl/${domain}/cert.pem;
-    ssl_certificate_key /etc/ssl/${domain}/key.pem;
-    
-    # Enable SSL protocols and ciphers
+    server_name $1 www.$1;
+    root /var/www/$1;
+    index index.php;
+    ssl_certificate $ssl_cert;
+    ssl_certificate_key $ssl_key;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+    ssl_ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256';
     ssl_prefer_server_ciphers on;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
-    ssl_session_tickets off;
-    
-    root /var/www/${domain}/wordpress;
-    index index.php index.html index.htm;
-    
-    access_log /var/log/nginx/${domain}.access.log;
-    error_log /var/log/nginx/${domain}.error.log;
-    
-    client_max_body_size 100M;
-    
-    # Optimasi RankMath SEO - Mulai
-    # Redirect www ke non-www atau sebaliknya (pilih salah satu)
-    if (\$host = www.${domain}) {
-        return 301 https://${domain}\$request_uri;
-    }
-    
-    # Disable directory listing
-    autoindex off;
-    
-    # Enable gzip compression
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
-    
-    # Cache static files
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
-        expires 365d;
-        add_header Cache-Control "public, no-transform";
-        access_log off;
-        log_not_found off;
-    }
-    
-    # Security headers for RankMath SEO
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-    
-    # XML Sitemap optimization
-    location ~* ^/sitemap(-index)?\.xml$ {
-        try_files \$uri \$uri/ /index.php?\$args;
-        access_log off;
-    }
-    
-    # RankMath SEO - End
-    
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    gzip on;
+    gzip_vary on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
     }
-    
     location ~ \.php\$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        fastcgi_pass unix:/run/php/php8.1-fpm.sock;
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         include fastcgi_params;
-        
-        # Optimasi PHP untuk RankMath
-        fastcgi_buffer_size 128k;
-        fastcgi_buffers 256 16k;
-        fastcgi_busy_buffers_size 256k;
-        fastcgi_temp_file_write_size 256k;
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
+        fastcgi_read_timeout 300;
     }
-    
     location ~ /\.ht {
         deny all;
     }
-    
-    location = /favicon.ico {
-        log_not_found off;
-        access_log off;
-    }
-    
-    location = /robots.txt {
-        allow all;
-        log_not_found off;
-        access_log off;
-    }
-    
-    # Block sensitive files
-    location ~* /(?:wp-config\.php|readme\.html|license\.txt|\.htaccess) {
+    location ~* /(wp-config\.php|\.env) {
         deny all;
     }
-    
-    # Block WordPress files that might reveal information
-    location ~* ^/wp-admin/includes/ { deny all; }
-    location ~* ^/wp-includes/.*\\.php\$ { deny all; }
-    location ~* ^/wp-includes/js/tinymce/langs/.*\\.php\$ { deny all; }
-    location /wp-content/uploads/ { internal; }
+    location = /xmlrpc.php {
+        deny all;
+        return 444;
+    }
+    location ~* ^/(instant-indexing|search|relevanssi) {
+        try_files \$uri \$uri/ /index.php?\$args;
+    }
+    location ~* ^/wp-content/plugins/wp-file-manager/lib/files/.*\.(php|php5|phtml)\$ {
+        deny all;
+    }
+}
+server {
+    listen 443 ssl http2;
+    server_name www.$1;
+    return 301 https://$1\$request_uri;
 }
 EOF
+    sudo ln -s /etc/nginx/sites-available/$1 /etc/nginx/sites-enabled/
+    sudo nginx -t && sudo systemctl reload nginx
+    pesan_sukses "Nginx dikonfigurasi"
+}
+
+pasang_wordpress() {
+    tampilkan_header
+    while true; do
+        read -p "Masukkan domain: " domain
+        validasi_domain "$domain" && break
+    done
     
-    # Aktifkan situs
-    sudo ln -s /etc/nginx/sites-available/${domain} /etc/nginx/sites-enabled/ > /dev/null
+    echo -e "\n${BIRU_MUDA}Pilihan database:"
+    echo "1) Kredensial otomatis"
+    echo "2) Kredensial manual"
+    read -p "Pilihan [1-2]: " pilihan_db
     
-    # Test dan reload Nginx
-    echo -e "\n${BIRU}Menguji konfigurasi Nginx...${NC}"
-    if sudo nginx -t > /dev/null 2>&1; then
-        sudo systemctl reload nginx > /dev/null
-        echo -e "${HIJAU}✓ Konfigurasi Nginx valid dan berhasil di-reload${NC}"
+    if [ "$pilihan_db" = "1" ]; then
+        hasilkan_kredensial_db
     else
-        echo -e "${MERAH}Error dalam konfigurasi Nginx${NC}"
-        exit 1
+        read -p "Nama database: " db_name
+        read -p "Pengguna database: " db_user
+        read -sp "Kata sandi database: " db_pass
+        echo
     fi
     
-    # Konfigurasi Fail2Ban untuk WordPress
-    echo -e "\n${BIRU}Mengkonfigurasi Fail2Ban untuk WordPress...${NC}"
-    sudo tee /etc/fail2ban/filter.d/wordpress.conf > /dev/null <<EOF
-[Definition]
-failregex = ^<HOST> .* "POST .*/wp-login.php HTTP/.*" 200
-ignoreregex =
+    pesan_status "Memulai instalasi sistem..."
+    pasang_paket nginx mariadb-server software-properties-common
+    sudo add-apt-repository -y ppa:ondrej/php > /dev/null 2>&1
+    sudo apt update > /dev/null
+    pasang_paket php8.1-fpm php8.1-common php8.1-mysql php8.1-gd php8.1-mbstring \
+        php8.1-xml php8.1-curl php8.1-zip php8.1-bcmath php8.1-soap php8.1-intl \
+        php8.1-imagick certbot python3-certbot-nginx
+    
+    konfigurasi_php
+    konfigurasi_mariadb
+    pasang_file_wordpress "$domain"
+    konfigurasi_wp_config "$domain"
+    
+    echo -e "\n${KUNING}Pilih SSL:"
+    echo "1) Let's Encrypt"
+    echo "2) Cloudflare"
+    echo "3) Self-Signed"
+    read -p "Pilihan [1-3]: " pilihan_ssl
+    
+    pasang_ssl "$pilihan_ssl" "$domain"
+    buat_konfigurasi_nginx "$domain" "$pilihan_ssl"
+    
+    echo -e "\n${KUNING}Pasang Redis untuk caching? [y/n]:${NC}"
+    read -p "Pilihan: " redis_choice
+    if [[ "$redis_choice" =~ ^[Yy] ]]; then
+        pasang_paket redis-server php-redis
+        cat << 'EOF' | sudo tee -a /var/www/$domain/wp-config.php > /dev/null
+define('WP_REDIS_HOST', '127.0.0.1');
+define('WP_REDIS_PORT', 6379);
+define('WP_REDIS_TIMEOUT', 1);
+define('WP_REDIS_READ_TIMEOUT', 1);
+define('WP_REDIS_DATABASE', 0);
 EOF
+        pesan_sukses "Redis terpasang"
+    fi
     
-    sudo tee /etc/fail2ban/jail.d/wordpress.conf > /dev/null <<EOF
-[wordpress]
-enabled = true
-port = http,https
-filter = wordpress
-logpath = /var/log/nginx/${domain}.error.log
-maxretry = 3
-bantime = 3600
-findtime = 600
-EOF
-    
-    sudo systemctl restart fail2ban > /dev/null
-    
-    # Tampilkan pesan penyelesaian
-    echo -e "\n${HIJAU}=== Instalasi WordPress Selesai ===${NC}"
-    echo -e "URL Website: https://${domain}"
-    echo -e "URL Admin: https://${domain}/wp-admin"
-    echo -e "Nama Database: ${dbname}"
-    echo -e "User Database: ${dbuser}"
-    echo -e "\n${KUNING}Harap selesaikan setup WordPress dengan mengunjungi URL admin.${NC}"
-    echo -e "Setelah instalasi WordPress selesai, install plugin RankMath SEO untuk mendapatkan manfaat penuh dari konfigurasi ini."
-    
-    # Jika menggunakan Cloudflare, berikan petunjuk tambahan
-    if [ "$ssl_choice" = "2" ]; then
-        echo -e "\n${BIRU}Catatan untuk Cloudflare:${NC}"
-        echo -e "1. Pastikan Anda telah mengatur SSL/TLS mode ke 'Full' atau 'Full (Strict)' di dashboard Cloudflare"
-        echo -e "2. Di tab 'Origin Server', pastikan Origin Certificate yang Anda gunakan sudah diinstal di server ini"
-        echo -e "3. Untuk performa terbaik, aktifkan 'Always Use HTTPS' dan 'HTTP/2' di Cloudflare"
+    tampilkan_header
+    echo -e "${HIJAU}INSTALASI SELESAI!${NC}"
+    echo -e "\nURL: https://$domain"
+    echo "Admin: https://$domain/wp-admin"
+    echo -e "\nDatabase: $db_name"
+    echo "Pengguna: $db_user"
+    echo "Password: $db_pass"
+    echo -e "\n${KUNING}Langkah selanjutnya:"
+    echo "1. Selesaikan setup WordPress"
+    echo "2. Pasang plugin yang direkomendasikan"
+    if [ "$pilihan_ssl" = "2" ]; then
+        echo -e "\nAtur Cloudflare:"
+        echo "- Mode SSL: Full (Strict)"
+        echo "- Always Use HTTPS: Aktif"
     fi
 }
 
-# Cek apakah skrip dijalankan sebagai root
 if [ "$(id -u)" -ne 0 ]; then
-    echo -e "${MERAH}Skrip ini harus dijalankan sebagai root atau dengan hak akses sudo.${NC}"
+    echo -e "${MERAH}Jalankan sebagai root!${NC}" >&2
     exit 1
 fi
 
-# Cek apakah berjalan di Ubuntu 22.04
-if [ "$(lsb_release -rs)" != "22.04" ]; then
-    echo -e "${MERAH}Skrip ini hanya untuk Ubuntu 22.04.${NC}"
+if ! lsb_release -i | grep -q "Ubuntu"; then
+    echo -e "${MERAH}Hanya untuk Ubuntu!${NC}" >&2
     exit 1
 fi
 
-# Cek apakah akan menginstal situs lain
+pasang_wordpress
+
 while true; do
-    install_wordpress
-    
-    read -p "Apakah Anda ingin menginstal situs WordPress lain? (y/n): " another
-    if [[ ! "$another" =~ ^[Yy] ]]; then
-        break
-    fi
+    echo -e "\n${KUNING}Instal situs lain? [y/n]:${NC}"
+    read -p "Pilihan: " lagi
+    [[ "$lagi" =~ ^[Yy] ]] || break
+    pasang_wordpress
 done
 
-echo -e "\n${HIJAU}Semua instalasi berhasil diselesaikan!${NC}"
+echo -e "\n${HIJAU}Semua instalasi selesai!${NC}"
