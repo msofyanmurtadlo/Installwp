@@ -57,7 +57,6 @@ setup_server() {
   log "info" "Mengamankan instalasi MariaDB..."
   run_task "Mengaktifkan & memulai MariaDB" systemctl enable --now mariadb.service
   
-  # Logika di sini telah diperbaiki
   run_task "Menghapus database tes dan user anonim" mysql -e "DROP DATABASE IF EXISTS test; DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;"
 
   read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk user root MariaDB: '${C_RESET})" mariadb_root_pass; echo
