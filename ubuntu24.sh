@@ -223,7 +223,20 @@ EOF
   log "info" "Mengatur izin file dan menguji konfigurasi Nginx..."
   run_task "Mengatur izin direktori" find "$web_root" -type d -exec chmod 755 {} \;
   run_task "Mengatur izin file" find "$web_root" -type f -exec chmod 644 {} \;
-  run_task "Membuat SSL DH params" openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048
+  
+  local dhparams_path="/etc/letsencrypt/ssl-dhparams.pem"
+  if [ ! -f "$dhparams_path" ]; then
+    log "info" "Membuat file SSL DH params (ini mungkin butuh waktu)..."
+    sudo openssl dhparam -out "$dhparams_path" 2048 &> /dev/null
+    if [ $? -eq 0 ]; then
+      log "success" "File SSL DH params berhasil dibuat!"
+    else
+      log "error" "Gagal membuat file SSL DH params. Periksa log atau jalankan manual."
+    fi
+  else
+    log "info" "File SSL DH params sudah ada. Melewati pembuatan."
+  fi
+  
   run_task "Menguji konfigurasi Nginx" nginx -t
   run_task "Reload Nginx" systemctl reload nginx
   
