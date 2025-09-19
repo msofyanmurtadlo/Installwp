@@ -36,7 +36,7 @@ setup_server() {
   log "info" "Memulai instalasi dependensi dasar & optimasi..."
   
   run_task "Memperbarui daftar paket & menginstal prasyarat" apt-get update -y
-  run_task "Menginstal software-properties-common" apt-get install -y software-properties-common nano
+  run_task "Menginstal software-properties-common dan nano" apt-get install -y software-properties-common nano
 
   log "info" "Menambahkan PPA untuk PHP 8.3..."
   run_task "Menambahkan PPA Ondrej/PHP" add-apt-repository -y ppa:ondrej/php
@@ -45,7 +45,7 @@ setup_server() {
   log "info" "Menginstal paket-paket inti (Nginx, MariaDB, PHP 8.3, Fail2ban)..."
   run_task "Menginstal paket" apt-get install -y \
     nginx mariadb-server mariadb-client \
-    unzip curl wget fail2ban certbot python3-certbot-nginx \
+    unzip curl wget fail2ban \
     redis-server php8.3-fpm php8.3-mysql php8.3-xml \
     php8.3-curl php8.3-gd php8.3-imagick php8.3-mbstring \
     php8.3-zip php8.3-intl php8.3-bcmath php8.3-redis
@@ -56,6 +56,13 @@ setup_server() {
 
   log "info" "Mengamankan instalasi MariaDB..."
   run_task "Mengaktifkan & memulai MariaDB" systemctl enable --now mariadb.service
+  
+  read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk user root MariaDB: '${C_RESET})" mariadb_root_pass; echo
+  if [ -z "$mariadb_root_pass" ]; then
+    log "warn" "Password root kosong. MariaDB mungkin tidak sepenuhnya aman."
+  else
+    run_task "Mengatur password user root MariaDB" mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_root_pass';"
+  fi
   run_task "Menghapus database tes dan user anonim" mysql -e "DROP DATABASE IF EXISTS test; DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;"
   
   log "info" "Mengonfigurasi Nginx untuk FastCGI Caching..."
@@ -67,7 +74,7 @@ fastcgi_cache_key "$scheme$request_method$host$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500;
 fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 EOF
-    run_task "Menambahkan konfigurasi FastCGI ke nginx.conf" sed -i '\|http {|a include /etc/nginx/fastcgi-cache.conf;' /etc/nginx/nginx.conf
+    run_task "Menambahkan konfigurasi FastCGI ke nginx.conf" sed -i '\|http {|a include /etc/nginx/fastcgi-cache.conf;|' /etc/nginx/nginx.conf
   fi
   
   log "info" "Mengonfigurasi Firewall (UFW)..."
@@ -110,8 +117,8 @@ add_website() {
   
   local dbname=$(echo "$domain" | tr '.' '_' | cut -c1-16)_wp
   local dbuser=$(echo "$domain" | tr '.' '_' | cut -c1-16)_usr
-  local dbpass=$(openssl rand -base64 12)
-  
+  read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk database user '${dbuser}': '${C_RESET})" dbpass; echo
+
   log "info" "Membuat database untuk '$domain'..."
   run_task "Membuat database '$dbname'" mysql -e "CREATE DATABASE $dbname;"
   run_task "Membuat user '$dbuser'" mysql -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$dbpass';"
@@ -130,56 +137,20 @@ define('WP_CACHE', true);
 define('WP_REDIS_HOST', '127.0.0.1');
 define('WP_REDIS_PORT', 6379);
 PHP
-  
-  local ssl_cert_path=""
-  local ssl_key_path=""
-  local ssl_choice=""
 
-  while true; do
-    echo -e "${C_CYAN}\n=========================================="
-    echo -e " 🔑 PILIHAN KONFIGURASI SSL"
-    echo -e "==========================================${C_RESET}"
-    echo -e "  ${C_GREEN}1. Gunakan Certbot (Gratis & Otomatis)${C_RESET}"
-    echo -e "  ${C_YELLOW}2. Unggah Sertifikat & Kunci Manual${C_RESET}"
-    read -p "$(echo -e ${C_BOLD}'Pilih opsi [1/2]: '${C_RESET})" ssl_choice
-    case $ssl_choice in
-      1)
-        log "info" "Menggunakan Certbot untuk mendapatkan sertifikat SSL..."
-        run_task "Menguji konfigurasi Nginx" nginx -t
-        run_task "Reload Nginx" systemctl reload nginx
-        sudo certbot --nginx --agree-tos --redirect --hsts --staple-ocsp --email admin@$domain -d "$domain,www.$domain"
-        ssl_cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"
-        ssl_key_path="/etc/letsencrypt/live/$domain/privkey.pem"
-        break
-        ;;
-      2)
-        log "warn" "Anda memilih untuk mengunggah sertifikat SSL secara manual."
-        
-        local ssl_dir="/etc/nginx/ssl/$domain"
-        run_task "Membuat direktori SSL" mkdir -p "$ssl_dir"
-        
-        ssl_cert_path="$ssl_dir/$domain.crt"
-        ssl_key_path="$ssl_dir/$domain.key"
-        
-        echo -e "${C_YELLOW}Buka nano dan tempelkan konten sertifikat SSL (file .crt) di sini.${C_RESET}"
-        read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
-        sudo nano "$ssl_cert_path"
-        
-        echo -e "${C_YELLOW}Buka nano dan tempelkan konten kunci privat SSL (file .key) di sini.${C_RESET}"
-        read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
-        sudo nano "$ssl_key_path"
-
-        run_task "Mengatur izin file SSL" sudo chmod 600 "$ssl_cert_path" "$ssl_key_path"
-        
-        break
-        ;;
-      *)
-        log "warn" "Pilihan tidak valid. Silakan coba lagi."
-        continue
-        ;;
-    esac
-  done
+  local ssl_dir="/etc/nginx/ssl/$domain"
+  run_task "Membuat direktori SSL" mkdir -p "$ssl_dir"
+  local ssl_cert_path="$ssl_dir/$domain.crt"
+  local ssl_key_path="$ssl_dir/$domain.key"
   
+  echo -e "${C_YELLOW}Buka nano dan tempelkan konten sertifikat SSL (file .crt) di sini.${C_RESET}"
+  read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
+  sudo nano "$ssl_cert_path"
+  
+  echo -e "${C_YELLOW}Buka nano dan tempelkan konten kunci privat SSL (file .key) di sini.${C_RESET}"
+  read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
+  sudo nano "$ssl_key_path"
+
   log "info" "Membuat file konfigurasi Nginx..."
   sudo tee "/etc/nginx/sites-available/$domain" > /dev/null <<EOF
 server {
