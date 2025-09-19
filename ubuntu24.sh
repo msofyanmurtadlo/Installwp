@@ -67,7 +67,7 @@ fastcgi_cache_key "$scheme$request_method$host$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500;
 fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 EOF
-    run_task "Menambahkan konfigurasi FastCGI ke nginx.conf" sed -i '\|http {|a include /etc/nginx/fastcgi-cache.conf;|' /etc/nginx/nginx.conf
+    run_task "Menambahkan konfigurasi FastCGI ke nginx.conf" sed -i '\|http {|a include /etc/nginx/fastcgi-cache.conf;' /etc/nginx/nginx.conf
   fi
   
   log "info" "Mengonfigurasi Firewall (UFW)..."
