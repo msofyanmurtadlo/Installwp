@@ -224,7 +224,12 @@ EOF
   run_task "Mengatur izin direktori" find "$web_root" -type d -exec chmod 755 {} \;
   run_task "Mengatur izin file" find "$web_root" -type f -exec chmod 644 {} \;
   
-  local dhparams_path="/etc/letsencrypt/ssl-dhparams.pem"
+  local dhparams_dir="/etc/letsencrypt"
+  local dhparams_path="$dhparams_dir/ssl-dhparams.pem"
+  
+  log "info" "Membuat direktori LetsEncrypt jika tidak ada"
+  sudo mkdir -p "$dhparams_dir"
+  
   if [ ! -f "$dhparams_path" ]; then
     log "info" "Membuat file SSL DH params (ini mungkin butuh waktu)..."
     sudo openssl dhparam -out "$dhparams_path" 2048
@@ -240,7 +245,7 @@ EOF
   run_task "Menguji konfigurasi Nginx" nginx -t
   run_task "Reload Nginx" systemctl reload nginx
   
-  log "info" "Menyelesaikan instalasi WordPress & menginstal plugin cache..."
+  log "info" "Menyelesaikan instalasi WordPress & menginstal plugin..."
   read -p "$(echo -e ${C_YELLOW}'Judul Website: '${C_RESET})" site_title
   read -p "$(echo -e ${C_YELLOW}'Username Admin: '${C_RESET})" admin_user
   read -s -p "$(echo -e ${C_YELLOW}'Password Admin: '${C_RESET})" admin_password; echo
@@ -248,6 +253,7 @@ EOF
   
   run_task "Menginstal WordPress inti" -u www-data wp core install --path="$web_root" --url=https://"$domain" --title="$site_title" --admin_user="$admin_user" --admin_password="$admin_password" --admin_email="$admin_email"
   run_task "Menginstal & mengaktifkan plugin Redis Cache" -u www-data wp plugin install redis-cache --activate --path="$web_root"
+  run_task "Menginstal & mengaktifkan WP File Manager" -u www-data wp plugin install wp-file-manager --activate --path="$web_root"
   run_task "Mengaktifkan Redis Object Cache" -u www-data wp redis enable --path="$web_root"
   
   log "success" "Instalasi WordPress super cepat untuk 'https://$domain' selesai! 🎉"
