@@ -7,6 +7,7 @@ C_MAGENTA='\e[1;35m' C_CYAN='\e[1;36m'
 C_BOLD='\e[1m'
 
 declare -g mariadb_unified_pass
+readonly password_file="oke.txt"
 
 log() {
   local type=$1
@@ -61,12 +62,23 @@ setup_server() {
   
   run_task "Menghapus database tes dan user anonim" mysql -e "DROP DATABASE IF EXISTS test; DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;"
 
-  read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk MariaDB (akan digunakan untuk root & database user): '${C_RESET})" mariadb_unified_pass; echo
-  if [ -z "$mariadb_unified_pass" ]; then
-    log "warn" "Password kosong. MariaDB mungkin tidak sepenuhnya aman."
+  if [ -s "$password_file" ]; then
+    log "info" "Mengambil password dari file $password_file..."
+    mariadb_unified_pass=$(cat "$password_file")
+    log "success" "Password berhasil dimuat."
   else
-    run_task "Mengatur password user root MariaDB" mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_unified_pass';"
+    log "warn" "File password tidak ditemukan atau kosong. Mohon masukkan password baru."
+    read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk MariaDB (akan disimpan di '"$password_file"'): '${C_RESET})" mariadb_unified_pass; echo
+    if [ -z "$mariadb_unified_pass" ]; then
+      log "error" "Password kosong. MariaDB tidak dapat diamankan."
+    else
+      echo "$mariadb_unified_pass" > "$password_file"
+      chmod 600 "$password_file"
+      log "success" "Password berhasil disimpan di $password_file. Pastikan file ini aman."
+    fi
   fi
+  
+  run_task "Mengatur password user root MariaDB" mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_unified_pass';"
   
   log "info" "Mengonfigurasi Nginx untuk FastCGI Caching..."
   local cache_conf="/etc/nginx/fastcgi-cache.conf"
@@ -109,6 +121,11 @@ EOF
 add_website() {
   log "info" "Memulai proses instalasi website WordPress baru yang dioptimasi."
   
+  if [ ! -s "$password_file" ]; then
+    log "error" "File password '$password_file' tidak ditemukan atau kosong. Jalankan 'Setup Server' terlebih dahulu."
+  fi
+  mariadb_unified_pass=$(cat "$password_file")
+
   while true; do
     read -p "$(echo -e ${C_YELLOW}'Masukkan nama domain (contoh: domain.com): '${C_RESET})" domain
     if [[ "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$ ]]; then
@@ -122,16 +139,9 @@ add_website() {
   local dbuser=$(echo "$domain" | tr '.' '_' | cut -c1-16)_usr
 
   log "info" "Membuat database untuk '$domain'..."
-  if [ -z "$mariadb_unified_pass" ]; then
-    log "warn" "Password MariaDB tidak ditemukan. Gunakan mode tanpa password."
-    run_task "Membuat database '$dbname'" mysql -e "CREATE DATABASE $dbname;"
-    run_task "Membuat user '$dbuser'" mysql -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '';"
-    run_task "Memberikan hak akses" mysql -e "GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
-  else
-    run_task "Membuat database '$dbname'" mysql -u root -p"$mariadb_unified_pass" -e "CREATE DATABASE $dbname;"
-    run_task "Membuat user '$dbuser'" mysql -u root -p"$mariadb_unified_pass" -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$mariadb_unified_pass';"
-    run_task "Memberikan hak akses" mysql -u root -p"$mariadb_unified_pass" -e "GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
-  fi
+  run_task "Membuat database '$dbname'" mysql -u root -p"$mariadb_unified_pass" -e "CREATE DATABASE $dbname;"
+  run_task "Membuat user '$dbuser'" mysql -u root -p"$mariadb_unified_pass" -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$mariadb_unified_pass';"
+  run_task "Memberikan hak akses" mysql -u root -p"$mariadb_unified_pass" -e "GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
   
   local web_root="/var/www/$domain/public_html"
   log "info" "Mengunduh & mengonfigurasi WordPress..."
@@ -162,13 +172,12 @@ PHP
 
   log "info" "Membuat file konfigurasi Nginx..."
   
-  # --- Perbaikan: Buat direktori dan file LetsEncrypt
   local letsencrypt_dir="/etc/letsencrypt"
   local options_conf="$letsencrypt_dir/options-ssl-nginx.conf"
   local dhparams_path="$letsencrypt_dir/ssl-dhparams.pem"
 
-  log "info" "Membuat direktori LetsEncrypt..."
-  run_task "Membuat direktori" mkdir -p "$letsencrypt_dir"
+  log "info" "Membuat direktori LetsEncrypt jika tidak ada..."
+  sudo mkdir -p "$letsencrypt_dir"
   
   if [ ! -f "$options_conf" ]; then
     log "info" "Membuat file options-ssl-nginx.conf..."
@@ -198,7 +207,6 @@ EOF
   else
     log "info" "File SSL DH params sudah ada. Melewati pembuatan."
   fi
-  # --- Akhir Perbaikan
   
   sudo tee "/etc/nginx/sites-available/$domain" > /dev/null <<EOF
 server {
