@@ -74,7 +74,7 @@ fastcgi_cache_key "$scheme$request_method$host$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500;
 fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 EOF
-    run_task "Menambahkan konfigurasi FastCGI ke nginx.conf" sed -i '\|http {|a include /etc/nginx/fastcgi-cache.conf;|' /etc/nginx/nginx.conf
+    run_task "Menambahkan konfigurasi FastCGI ke nginx.conf" sed -i '/http {/a include /etc/nginx/fastcgi-cache.conf;' /etc/nginx/nginx.conf
   fi
   
   log "info" "Mengonfigurasi Firewall (UFW)..."
@@ -140,10 +140,10 @@ PHP
 
   local ssl_dir="/etc/nginx/ssl/$domain"
   run_task "Membuat direktori SSL" mkdir -p "$ssl_dir"
-  local ssl_cert_path="$ssl_dir/$domain.crt"
+  local ssl_cert_path="$ssl_dir/$domain.cert"
   local ssl_key_path="$ssl_dir/$domain.key"
   
-  echo -e "${C_YELLOW}Buka nano dan tempelkan konten sertifikat SSL (file .crt) di sini.${C_RESET}"
+  echo -e "${C_YELLOW}Buka nano dan tempelkan konten sertifikat SSL (file .cert) di sini.${C_RESET}"
   read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
   sudo nano "$ssl_cert_path"
   
