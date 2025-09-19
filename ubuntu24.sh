@@ -161,6 +161,45 @@ PHP
   sudo nano "$ssl_key_path"
 
   log "info" "Membuat file konfigurasi Nginx..."
+  
+  # --- Perbaikan: Buat direktori dan file LetsEncrypt
+  local letsencrypt_dir="/etc/letsencrypt"
+  local options_conf="$letsencrypt_dir/options-ssl-nginx.conf"
+  local dhparams_path="$letsencrypt_dir/ssl-dhparams.pem"
+
+  log "info" "Membuat direktori LetsEncrypt..."
+  run_task "Membuat direktori" mkdir -p "$letsencrypt_dir"
+  
+  if [ ! -f "$options_conf" ]; then
+    log "info" "Membuat file options-ssl-nginx.conf..."
+    sudo tee "$options_conf" > /dev/null <<'EOF'
+ssl_session_cache shared:le_nginx_SSL:10m;
+ssl_session_timeout 1440m;
+ssl_session_tickets off;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers on;
+ssl_ciphers "EECDH+AESGCM:EDH+AESGCM";
+ssl_ecdh_curve secp384r1;
+ssl_stapling on;
+ssl_stapling_verify on;
+resolver 8.8.8.8 8.8.4.4 valid=300s;
+resolver_timeout 5s;
+EOF
+  fi
+
+  if [ ! -f "$dhparams_path" ]; then
+    log "info" "Membuat file SSL DH params (ini mungkin butuh waktu)..."
+    sudo openssl dhparam -out "$dhparams_path" 2048
+    if [ $? -eq 0 ]; then
+      log "success" "File SSL DH params berhasil dibuat!"
+    else
+      log "error" "Gagal membuat file SSL DH params. Periksa log atau jalankan manual."
+    fi
+  else
+    log "info" "File SSL DH params sudah ada. Melewati pembuatan."
+  fi
+  # --- Akhir Perbaikan
+  
   sudo tee "/etc/nginx/sites-available/$domain" > /dev/null <<EOF
 server {
     listen 80;
@@ -223,24 +262,6 @@ EOF
   log "info" "Mengatur izin file dan menguji konfigurasi Nginx..."
   run_task "Mengatur izin direktori" find "$web_root" -type d -exec chmod 755 {} \;
   run_task "Mengatur izin file" find "$web_root" -type f -exec chmod 644 {} \;
-  
-  local dhparams_dir="/etc/letsencrypt"
-  local dhparams_path="$dhparams_dir/ssl-dhparams.pem"
-  
-  log "info" "Membuat direktori LetsEncrypt jika tidak ada"
-  sudo mkdir -p "$dhparams_dir"
-  
-  if [ ! -f "$dhparams_path" ]; then
-    log "info" "Membuat file SSL DH params (ini mungkin butuh waktu)..."
-    sudo openssl dhparam -out "$dhparams_path" 2048
-    if [ $? -eq 0 ]; then
-      log "success" "File SSL DH params berhasil dibuat!"
-    else
-      log "error" "Gagal membuat file SSL DH params. Periksa log atau jalankan manual."
-    fi
-  else
-    log "info" "File SSL DH params sudah ada. Melewati pembuatan."
-  fi
   
   run_task "Menguji konfigurasi Nginx" nginx -t
   run_task "Reload Nginx" systemctl reload nginx
