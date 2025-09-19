@@ -6,6 +6,8 @@ C_YELLOW='\e[1;33m' C_BLUE='\e[1;34m'
 C_MAGENTA='\e[1;35m' C_CYAN='\e[1;36m'
 C_BOLD='\e[1m'
 
+declare -g mariadb_unified_pass
+
 log() {
   local type=$1
   local msg=$2
@@ -59,11 +61,11 @@ setup_server() {
   
   run_task "Menghapus database tes dan user anonim" mysql -e "DROP DATABASE IF EXISTS test; DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;"
 
-  read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk user root MariaDB: '${C_RESET})" mariadb_root_pass; echo
-  if [ -z "$mariadb_root_pass" ]; then
-    log "warn" "Password root kosong. MariaDB mungkin tidak sepenuhnya aman."
+  read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk MariaDB (akan digunakan untuk root & database user): '${C_RESET})" mariadb_unified_pass; echo
+  if [ -z "$mariadb_unified_pass" ]; then
+    log "warn" "Password kosong. MariaDB mungkin tidak sepenuhnya aman."
   else
-    run_task "Mengatur password user root MariaDB" mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_root_pass';"
+    run_task "Mengatur password user root MariaDB" mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_unified_pass';"
   fi
   
   log "info" "Mengonfigurasi Nginx untuk FastCGI Caching..."
@@ -118,12 +120,18 @@ add_website() {
   
   local dbname=$(echo "$domain" | tr '.' '_' | cut -c1-16)_wp
   local dbuser=$(echo "$domain" | tr '.' '_' | cut -c1-16)_usr
-  read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk database user '${dbuser}': '${C_RESET})" dbpass; echo
 
   log "info" "Membuat database untuk '$domain'..."
-  run_task "Membuat database '$dbname'" mysql -e "CREATE DATABASE $dbname;"
-  run_task "Membuat user '$dbuser'" mysql -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$dbpass';"
-  run_task "Memberikan hak akses" mysql -e "GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
+  if [ -z "$mariadb_unified_pass" ]; then
+    log "warn" "Password MariaDB tidak ditemukan. Gunakan mode tanpa password."
+    run_task "Membuat database '$dbname'" mysql -e "CREATE DATABASE $dbname;"
+    run_task "Membuat user '$dbuser'" mysql -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$dbpass';"
+    run_task "Memberikan hak akses" mysql -e "GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
+  else
+    run_task "Membuat database '$dbname'" mysql -u root -p"$mariadb_unified_pass" -e "CREATE DATABASE $dbname;"
+    run_task "Membuat user '$dbuser'" mysql -u root -p"$mariadb_unified_pass" -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$mariadb_unified_pass';"
+    run_task "Memberikan hak akses" mysql -u root -p"$mariadb_unified_pass" -e "GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
+  fi
   
   local web_root="/var/www/$domain/public_html"
   log "info" "Mengunduh & mengonfigurasi WordPress..."
@@ -132,7 +140,7 @@ add_website() {
   run_task "Mengunduh file WordPress" -u www-data wp core download --path="$web_root"
   
   run_task "Membuat file wp-config.php" -u www-data wp config create --path="$web_root" \
-    --dbname="$dbname" --dbuser="$dbuser" --dbpass="$dbpass" \
+    --dbname="$dbname" --dbuser="$dbuser" --dbpass="$mariadb_unified_pass" \
     --extra-php <<'PHP'
 define('WP_CACHE', true);
 define('WP_REDIS_HOST', '127.0.0.1');
