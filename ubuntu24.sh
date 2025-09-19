@@ -10,10 +10,10 @@ log() {
   local type=$1
   local msg=$2
   case "$type" in
-    "info")    echo -e "${C_BLUE}INFO:${C_RESET} $msg" ;;
+    "info") echo -e "${C_BLUE}INFO:${C_RESET} $msg" ;;
     "success") echo -e "${C_GREEN}SUKSES:${C_RESET} $msg" ;;
-    "warn")    echo -e "${C_YELLOW}PERINGATAN:${C_RESET} $msg" ;;
-    "error")   echo -e "${C_RED}ERROR:${C_RESET} $msg${C_RESET}"; exit 1 ;;
+    "warn") echo -e "${C_YELLOW}PERINGATAN:${C_RESET} $msg" ;;
+    "error") echo -e "${C_RED}ERROR:${C_RESET} $msg${C_RESET}"; exit 1 ;;
   esac
 }
 
@@ -83,12 +83,12 @@ ignoreregex =
 EOF
   run_task "Menambahkan aturan WordPress ke jail.local" sudo tee -a /etc/fail2ban/jail.local > /dev/null <<EOF
 [wordpress-hard]
-enabled  = true
-port     = http,https
-filter   = wordpress-hard
-logpath  = /var/log/nginx/access.log
+enabled = true
+port = http,https
+filter = wordpress-hard
+logpath = /var/log/nginx/access.log
 maxretry = 3
-bantime  = 3600
+bantime = 3600
 findtime = 600
 EOF
   run_task "Mengaktifkan & memulai layanan Fail2Ban" systemctl enable --now fail2ban
@@ -131,6 +131,44 @@ define('WP_REDIS_HOST', '127.0.0.1');
 define('WP_REDIS_PORT', 6379);
 PHP
   
+  local ssl_cert_path=""
+  local ssl_key_path=""
+  local ssl_choice=""
+
+  while true; do
+    echo -e "${C_CYAN}\n=========================================="
+    echo -e " 🔑 PILIHAN KONFIGURASI SSL"
+    echo -e "==========================================${C_RESET}"
+    echo -e "  ${C_GREEN}1. Gunakan Certbot (Gratis & Otomatis)${C_RESET}"
+    echo -e "  ${C_YELLOW}2. Unggah Sertifikat & Kunci Manual${C_RESET}"
+    read -p "$(echo -e ${C_BOLD}'Pilih opsi [1/2]: '${C_RESET})" ssl_choice
+    case $ssl_choice in
+      1)
+        log "info" "Menggunakan Certbot untuk mendapatkan sertifikat SSL..."
+        run_task "Menguji konfigurasi Nginx" nginx -t
+        run_task "Reload Nginx" systemctl reload nginx
+        sudo certbot --nginx --agree-tos --redirect --hsts --staple-ocsp --email admin@$domain -d "$domain,www.$domain"
+        ssl_cert_path="/etc/letsencrypt/live/$domain/fullchain.pem"
+        ssl_key_path="/etc/letsencrypt/live/$domain/privkey.pem"
+        break
+        ;;
+      2)
+        log "warn" "Anda memilih untuk mengunggah sertifikat SSL secara manual."
+        read -p "$(echo -e ${C_YELLOW}'Masukkan path lengkap file sertifikat (.crt): '${C_RESET})" ssl_cert_path
+        read -p "$(echo -e ${C_YELLOW}'Masukkan path lengkap file kunci (.key): '${C_RESET})" ssl_key_path
+        if [ ! -f "$ssl_cert_path" ] || [ ! -f "$ssl_key_path" ]; then
+          log "error" "File sertifikat atau kunci tidak ditemukan. Mohon periksa path."
+          continue
+        fi
+        break
+        ;;
+      *)
+        log "warn" "Pilihan tidak valid. Silakan coba lagi."
+        continue
+        ;;
+    esac
+  done
+  
   log "info" "Membuat file konfigurasi Nginx..."
   sudo tee "/etc/nginx/sites-available/$domain" > /dev/null <<EOF
 server {
@@ -145,8 +183,8 @@ server {
     server_name $domain www.$domain;
     root $web_root;
     index index.php index.html index.htm;
-    ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
+    ssl_certificate $ssl_cert_path;
+    ssl_certificate_key $ssl_key_path;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -191,13 +229,12 @@ server {
 EOF
   run_task "Mengaktifkan site Nginx" ln -s /etc/nginx/sites-available/$domain /etc/nginx/sites-enabled/
   
-  log "info" "Mengatur izin file dan mendapatkan sertifikat SSL..."
+  log "info" "Mengatur izin file dan menguji konfigurasi Nginx..."
   run_task "Mengatur izin direktori" find "$web_root" -type d -exec chmod 755 {} \;
   run_task "Mengatur izin file" find "$web_root" -type f -exec chmod 644 {} \;
   run_task "Membuat SSL DH params" openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048
   run_task "Menguji konfigurasi Nginx" nginx -t
   run_task "Reload Nginx" systemctl reload nginx
-  sudo certbot --nginx --agree-tos --redirect --hsts --staple-ocsp --email admin@$domain -d "$domain,www.$domain"
   
   log "info" "Menyelesaikan instalasi WordPress & menginstal plugin cache..."
   read -p "$(echo -e ${C_YELLOW}'Judul Website: '${C_RESET})" site_title
