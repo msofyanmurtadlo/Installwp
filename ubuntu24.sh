@@ -125,7 +125,7 @@ add_website() {
   if [ -z "$mariadb_unified_pass" ]; then
     log "warn" "Password MariaDB tidak ditemukan. Gunakan mode tanpa password."
     run_task "Membuat database '$dbname'" mysql -e "CREATE DATABASE $dbname;"
-    run_task "Membuat user '$dbuser'" mysql -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$dbpass';"
+    run_task "Membuat user '$dbuser'" mysql -e "CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '';"
     run_task "Memberikan hak akses" mysql -e "GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
   else
     run_task "Membuat database '$dbname'" mysql -u root -p"$mariadb_unified_pass" -e "CREATE DATABASE $dbname;"
@@ -227,7 +227,7 @@ EOF
   local dhparams_path="/etc/letsencrypt/ssl-dhparams.pem"
   if [ ! -f "$dhparams_path" ]; then
     log "info" "Membuat file SSL DH params (ini mungkin butuh waktu)..."
-    sudo openssl dhparam -out "$dhparams_path" 2048 &> /dev/null
+    sudo openssl dhparam -out "$dhparams_path" 2048
     if [ $? -eq 0 ]; then
       log "success" "File SSL DH params berhasil dibuat!"
     else
