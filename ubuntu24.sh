@@ -36,7 +36,7 @@ setup_server() {
   log "info" "Memulai instalasi dependensi dasar & optimasi..."
   
   run_task "Memperbarui daftar paket & menginstal prasyarat" apt-get update -y
-  run_task "Menginstal software-properties-common" apt-get install -y software-properties-common
+  run_task "Menginstal software-properties-common" apt-get install -y software-properties-common nano
 
   log "info" "Menambahkan PPA untuk PHP 8.3..."
   run_task "Menambahkan PPA Ondrej/PHP" add-apt-repository -y ppa:ondrej/php
@@ -154,12 +154,23 @@ PHP
         ;;
       2)
         log "warn" "Anda memilih untuk mengunggah sertifikat SSL secara manual."
-        read -p "$(echo -e ${C_YELLOW}'Masukkan path lengkap file sertifikat (.crt): '${C_RESET})" ssl_cert_path
-        read -p "$(echo -e ${C_YELLOW}'Masukkan path lengkap file kunci (.key): '${C_RESET})" ssl_key_path
-        if [ ! -f "$ssl_cert_path" ] || [ ! -f "$ssl_key_path" ]; then
-          log "error" "File sertifikat atau kunci tidak ditemukan. Mohon periksa path."
-          continue
-        fi
+        
+        local ssl_dir="/etc/nginx/ssl/$domain"
+        run_task "Membuat direktori SSL" mkdir -p "$ssl_dir"
+        
+        ssl_cert_path="$ssl_dir/$domain.crt"
+        ssl_key_path="$ssl_dir/$domain.key"
+        
+        echo -e "${C_YELLOW}Buka nano dan tempelkan konten sertifikat SSL (file .crt) di sini.${C_RESET}"
+        read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
+        sudo nano "$ssl_cert_path"
+        
+        echo -e "${C_YELLOW}Buka nano dan tempelkan konten kunci privat SSL (file .key) di sini.${C_RESET}"
+        read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
+        sudo nano "$ssl_key_path"
+
+        run_task "Mengatur izin file SSL" sudo chmod 600 "$ssl_cert_path" "$ssl_key_path"
+        
         break
         ;;
       *)
