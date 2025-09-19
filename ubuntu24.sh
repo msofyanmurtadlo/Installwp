@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# --- Definisi Warna untuk Output ---
 C_RESET='\e[0m'
 C_RED='\e[1;31m'
 C_GREEN='\e[1;32m'
@@ -9,18 +8,16 @@ C_BLUE='\e[1;34m'
 C_CYAN='\e[1;36m'
 C_BOLD='\e[1m'
 
-# --- Fungsi Utility untuk Output ---
 print_info() { echo -e "${C_BLUE}INFO:${C_RESET} $1"; }
 print_success() { echo -e "${C_GREEN}SUKSES:${C_RESET} $1"; }
 print_warning() { echo -e "${C_YELLOW}PERINGATAN:${C_RESET} $1"; }
 print_error() { echo -e "${C_RED}ERROR:${C_RESET} $1"; }
 
-# --- Fungsi untuk Menjalankan Tugas dengan Feedback ---
 run_task() {
     local description=$1
     shift
     local command="$@"
-
+    
     printf "${C_CYAN}  -> ${description}...${C_RESET}"
     output=$($command 2>&1)
     if [ $? -eq 0 ]; then
@@ -32,10 +29,9 @@ run_task() {
     fi
 }
 
-# --- Fungsi untuk Instalasi Dependensi Server ---
 install_dependencies() {
     print_info "Memulai instalasi dependensi dasar & optimasi..."
-
+    
     run_task "Memperbarui daftar paket" "sudo apt-get update -y"
     
     print_info "Menginstal paket-paket inti, optimasi, dan keamanan..."
@@ -60,7 +56,6 @@ fastcgi_cache_key "$scheme$request_method$host$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500;
 fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 EOF
-    # Memperbaiki perintah sed
     run_task "Menambahkan konfigurasi FastCGI ke nginx.conf" "sudo sed -i '/http {/a include /etc/nginx/fastcgi-cache.conf;' /etc/nginx/nginx.conf"
 
     print_info "Mengamankan MariaDB..."
@@ -75,7 +70,6 @@ EOF
     
     print_info "Konfigurasi Fail2Ban..."
     run_task "Membuat file konfigurasi lokal untuk Fail2Ban" "sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local"
-    # Menambahkan konfigurasi khusus untuk WordPress
     sudo tee /etc/fail2ban/filter.d/wordpress-hard.conf > /dev/null <<EOF
 [Definition]
 failregex = ^<HOST> -.*"(GET|POST) /wp-login.php
@@ -97,7 +91,6 @@ EOF
     print_success "Semua dependensi dasar dan optimasi berhasil diinstal."
 }
 
-# --- Fungsi untuk Instalasi Website WordPress Baru ---
 install_new_website() {
     print_info "Memulai proses instalasi website WordPress baru yang dioptimasi."
     
@@ -159,7 +152,6 @@ server {
     
     client_max_body_size 100M;
     
-    # Aturan FastCGI Caching
     set \$skip_cache 0;
     if (\$request_method = POST) { set \$skip_cache 1; }
     if (\$query_string != "") { set \$skip_cache 1; }
@@ -174,7 +166,6 @@ server {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
         
-        # Konfigurasi Caching
         fastcgi_cache WORDPRESS;
         fastcgi_cache_valid 200 60m;
         fastcgi_cache_bypass \$skip_cache;
@@ -182,7 +173,6 @@ server {
         add_header X-Cache-Status \$upstream_cache_status;
     }
     
-    # Blokir akses ke file sensitif
     location ~* /(?:wp-config.php|wp-content/debug.log|wp-content/themes/.*\.zip|uploads/.*\.php)$ {
         deny all;
         return 404;
@@ -191,14 +181,12 @@ server {
         deny all;
     }
     
-    # Kompresi Gzip
     gzip on;
     gzip_vary on;
     gzip_min_length 1024;
     gzip_comp_level 5;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
-    # Browser Caching
     location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
         expires 365d;
         add_header Cache-Control "public, no-transform";
@@ -230,7 +218,6 @@ EOF
     print_warning "Jangan lupa untuk menyimpan password database DAN admin yang ditampilkan di atas."
 }
 
-# --- Fungsi untuk Mencantumkan Website ---
 list_websites() {
     print_info "Mencari website yang dikelola oleh Nginx..."
     local sites_dir="/etc/nginx/sites-enabled"
@@ -248,7 +235,6 @@ list_websites() {
     fi
 }
 
-# --- Fungsi untuk Menampilkan Menu Utama ---
 show_menu() {
     clear
     echo -e "${C_CYAN}"
@@ -263,7 +249,6 @@ show_menu() {
     echo ""
 }
 
-# --- Loop Menu Utama ---
 while true; do
     show_menu
     read -p "$(echo -e ${C_BOLD}'Pilih opsi [1-4]: '${C_RESET})" choice
