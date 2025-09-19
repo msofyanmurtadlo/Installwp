@@ -31,8 +31,7 @@ run_task() {
     return 0
   else
     echo -e "${C_RED}[GAGAL]${C_RESET}"
-    log "warn" "Gagal menjalankan '$description'. Ini mungkin tidak signifikan jika sudah dikonfigurasi sebelumnya."
-    return 1
+    log "error" "Gagal menjalankan '$description'. Periksa log sistem untuk detail."
   fi
 }
 
@@ -61,7 +60,6 @@ setup_server() {
   log "info" "Mengamankan instalasi MariaDB..."
   run_task "Mengaktifkan & memulai MariaDB" systemctl enable --now mariadb.service
   
-  # Perubahan: Mengubah run_task dari error menjadi warn
   run_task "Menghapus database tes dan user anonim" mysql -e "DROP DATABASE IF EXISTS test; DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;"
 
   if [ -s "$password_file" ]; then
@@ -207,7 +205,7 @@ EOF
     if [ $? -eq 0 ]; then
       log "success" "File SSL DH params berhasil dibuat!"
     else
-      log "warn" "Gagal membuat file SSL DH params. Ini mungkin tidak signifikan."
+      log "error" "Gagal membuat file SSL DH params. Periksa log atau jalankan manual."
     fi
   else
     log "info" "File SSL DH params sudah ada. Melewati pembuatan."
