@@ -67,7 +67,7 @@ setup_server() {
     mariadb_unified_pass=$(cat "$password_file")
     log "success" "Password berhasil dimuat."
   else
-    log "warn" "File password tidak ditemukan atau kosong. Mohon masukkan password baru."
+    echo -e "${C_BOLD}${C_YELLOW}--- KATA SANDI BARU ---${C_RESET}"
     read -s -p "$(echo -e ${C_YELLOW}'Masukkan password untuk MariaDB (akan disimpan di '"$password_file"'): '${C_RESET})" mariadb_unified_pass; echo
     if [ -z "$mariadb_unified_pass" ]; then
       log "error" "Password kosong. MariaDB tidak dapat diamankan."
@@ -127,6 +127,7 @@ add_website() {
   mariadb_unified_pass=$(cat "$password_file")
 
   while true; do
+    echo -e "${C_BOLD}${C_YELLOW}--- INFO WEBSITE BARU ---${C_RESET}"
     read -p "$(echo -e ${C_YELLOW}'Masukkan nama domain (contoh: domain.com): '${C_RESET})" domain
     if [[ "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$ ]]; then
       break
@@ -162,10 +163,12 @@ PHP
   local ssl_cert_path="$ssl_dir/$domain.cert"
   local ssl_key_path="$ssl_dir/$domain.key"
   
+  echo -e "${C_BOLD}${C_YELLOW}--- SERTIFIKAT SSL ---${C_RESET}"
   echo -e "${C_YELLOW}Buka nano dan tempelkan konten sertifikat SSL (file .cert) di sini.${C_RESET}"
   read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
   sudo nano "$ssl_cert_path"
   
+  echo -e "${C_BOLD}${C_YELLOW}--- KUNCI PRIVAT SSL ---${C_RESET}"
   echo -e "${C_YELLOW}Buka nano dan tempelkan konten kunci privat SSL (file .key) di sini.${C_RESET}"
   read -p "$(echo -e ${C_BOLD}'Tekan ENTER untuk melanjutkan... '${C_RESET})"
   sudo nano "$ssl_key_path"
@@ -275,6 +278,7 @@ EOF
   run_task "Reload Nginx" systemctl reload nginx
   
   log "info" "Menyelesaikan instalasi WordPress & menginstal plugin..."
+  echo -e "${C_BOLD}${C_YELLOW}--- INFO WORDPRESS ADMIN ---${C_RESET}"
   read -p "$(echo -e ${C_YELLOW}'Judul Website: '${C_RESET})" site_title
   read -p "$(echo -e ${C_YELLOW}'Username Admin: '${C_RESET})" admin_user
   read -s -p "$(echo -e ${C_YELLOW}'Password Admin: '${C_RESET})" admin_password; echo
