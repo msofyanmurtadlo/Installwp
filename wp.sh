@@ -116,9 +116,8 @@ load_or_create_password() {
     fi
 }
 
-# --- LOGIC BARU: CLOUDFLARE REAL IP ---
 setup_cloudflare_real_ip() {
-    log "info" "Mengonfigurasi Real IP Cloudflare untuk Nginx..."
+    log "info" "Mengonfigurasi Real IP Cloudflare..."
     cat <<EOF > /etc/nginx/conf.d/cloudflare.conf
 set_real_ip_from 173.245.48.0/20;
 set_real_ip_from 103.21.244.0/22;
@@ -145,9 +144,8 @@ real_ip_header CF-Connecting-IP;
 EOF
 }
 
-# --- LOGIC BARU: FAIL2BAN ---
 setup_fail2ban_logic() {
-    log "info" "Mengonfigurasi Fail2Ban untuk SSH dan WordPress..."
+    log "info" "Mengonfigurasi Fail2Ban..."
     cat <<EOF > /etc/fail2ban/filter.d/wordpress.conf
 [Definition]
 failregex = ^<HOST>.* "POST /wp-login.php
@@ -213,7 +211,7 @@ setup_server() {
 
     run_task "Memulai layanan MariaDB" systemctl enable --now mariadb.service || log "error"
     load_or_create_password
-    run_task "Mengatur User Root MariaDB" mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_unified_pass'; FLUSH PRIVILEGES;" 2>/dev/null || mysql -u root -p"$mariadb_unified_pass" -e "SELECT 1;"
+    run_task "Mengatur User Root MariaDB" mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_unified_pass'; FLUSH PRIVILEGES;" 2>/dev/null || mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_unified_pass';"
 
     if ! ufw status | grep -q "Status: active"; then
         run_task "Mengizinkan OpenSSH" ufw allow 'OpenSSH'
@@ -376,7 +374,7 @@ EOF
     run_task "Menghapus plugin bawaan" sudo -u www-data wp plugin delete hello akismet --path="$web_root"
 
     log "info" "Menginstal plugin-plugin standar..."
-    run_task "Menginstal plugin" sudo -u www-data wp plugin install wp-file-manager disable-comments-rb floating-ads-bottom post-views-counter seo-by-rank-math --activate --path="$web_root" || log "error"
+    run_task "Menginstal plugin standar" sudo -u www-data wp plugin install wp-file-manager disable-comments-rb floating-ads-bottom post-views-counter seo-by-rank-math --activate --path="$web_root" || log "error"
 
     log "info" "Mengunduh dan mengekstrak paket plugin kustom..."
     local plugin_url="https://github.com/sofyanmurtadlo10/wp/blob/main/plugin.zip?raw=true"
@@ -408,63 +406,129 @@ list_websites() {
 update_semua_situs() {
     log "header" "MEMPERBARUI WORDPRESS CORE, PLUGIN & TEMA"
     local sites_dir="/etc/nginx/sites-enabled"
+    local sites_found=0
+
+    if [ ! -d "$sites_dir" ] || [ -z "$(ls -A "$sites_dir")" ]; then
+        log "warn" "Tidak ada website yang ditemukan untuk diperbarui."
+        return
+    fi
+
     for nginx_conf in "$sites_dir"/*; do
         local domain=$(basename "$nginx_conf")
         [[ "$domain" == "default" ]] && continue
-        local web_root=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
-        if [ -f "$web_root/wp-config.php" ]; then
-            echo -e "\n🔎 Memproses situs: $domain"
-            run_task "Update Core" sudo -u www-data wp core update --path="$web_root"
-            run_task "Update Plugins" sudo -u www-data wp plugin update --all --path="$web_root"
+        if [ ! -f "$nginx_conf" ]; then continue; fi
+
+        sites_found=$((sites_found + 1))
+        echo -e "\n${C_BOLD}${C_CYAN}🔎 Memproses situs: $domain${C_RESET}"
+
+        local web_root
+        web_root=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
+        
+        if [ -z "$web_root" ] || [ ! -d "$web_root" ]; then
+            log "warn" "Direktori root untuk '$domain' tidak ditemukan. Melewati."
+            continue
         fi
+        
+        if [ ! -f "$web_root/wp-config.php" ]; then
+            log "warn" "Instalasi WordPress tidak ditemukan di '$web_root'. Melewati."
+            continue
+        fi
+
+        log "info" "Path terdeteksi: $web_root"
+        run_task "Update Core" sudo -u www-data wp core update --path="$web_root"
+        run_task "Update Plugins" sudo -u www-data wp plugin update --all --path="$web_root"
+        run_task "Update Themes" sudo -u www-data wp theme update --all --path="$web_root"
     done
+
+    if [ "$sites_found" -eq 0 ]; then
+        log "warn" "Tidak ada website WordPress yang dikonfigurasi."
+    else
+        log "success" "Proses pembaruan selesai."
+    fi
 }
 
 delete_website() {
     log "header" "HAPUS WEBSITE"
     local domain
     prompt_input "Nama domain yang akan dihapus" domain
+    if [ -z "$domain" ]; then
+        log "warn" "Nama domain kosong. Operasi dibatalkan."
+        return
+    fi
+
     local nginx_conf="/etc/nginx/sites-enabled/$domain"
     local ssl_dir="/etc/nginx/ssl/$domain"
     local log_dir="/var/log/nginx/$domain"
     local web_root_parent
 
     if [ -f "$nginx_conf" ]; then
-        local public_html_path=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
-        [ -n "$public_html_path" ] && web_root_parent=$(dirname "$public_html_path")
+        local public_html_path
+        public_html_path=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
+        if [ -n "$public_html_path" ]; then
+            web_root_parent=$(dirname "$public_html_path")
+        fi
     fi
 
-    [ -z "$web_root_parent" ] && web_root_parent="/var/www/$domain"
+    if [ -z "$web_root_parent" ]; then
+        web_root_parent="/var/www/$domain"
+    fi
     
     local dbname=$(generate_db_credentials "$domain" "_wp")
     local dbuser=$(generate_db_credentials "$domain" "_usr")
 
-    read -p "❓ Hapus semua data domain $domain? (y/N): " confirmation
-    if [[ ! "$confirmation" =~ ^[Yy]$ ]]; then return; fi
+    log "warn" "Anda akan menghapus SEMUA data untuk domain '$domain' secara permanen."
+    log "warn" "Direktori ${web_root_parent} dan database ${dbname} juga akan dihapus."
+    
+    local confirmation
+    read -p "$(echo -e ${C_BOLD}${C_YELLOW}'❓ Apakah Anda benar-benar yakin? (y/N): '${C_RESET})" confirmation
 
-    run_task "Hapus Nginx conf" rm "$nginx_conf"
-    run_task "Hapus Web Root" rm -rf "$web_root_parent"
-    run_task "Hapus SSL & Log" rm -rf "$ssl_dir" "$log_dir"
-    run_task "Reload Nginx" systemctl reload nginx
+    if [[ ! "$confirmation" =~ ^[Yy]$ ]]; then
+        log "info" "Operasi penghapusan dibatalkan."
+        return
+    fi
+
+    log "info" "Memulai proses penghapusan..."
+    if [ -f "$nginx_conf" ]; then
+        run_task "Menghapus konfigurasi Nginx" rm "$nginx_conf"
+    fi
+    run_task "Me-reload Nginx" systemctl reload nginx
+
+    if [ -d "$web_root_parent" ]; then
+        run_task "Menghapus direktori web" rm -rf "$web_root_parent"
+    fi
+    
+    if [ -d "$ssl_dir" ]; then run_task "Menghapus direktori SSL" rm -rf "$ssl_dir"; fi
+    if [ -d "$log_dir" ]; then run_task "Menghapus direktori log" rm -rf "$log_dir"; fi
 
     load_or_create_password
-    run_task "Hapus DB" mysql -u root -p"$mariadb_unified_pass" -e "DROP DATABASE IF EXISTS $dbname; DROP USER IF EXISTS '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
-    log "success" "Selesai dihapus."
+    if mysql -u root -p"$mariadb_unified_pass" -e "USE $dbname;" &>/dev/null; then
+        run_task "Menghapus database" mysql -u root -p"$mariadb_unified_pass" -e "DROP DATABASE IF EXISTS $dbname;"
+        run_task "Menghapus user database" mysql -u root -p"$mariadb_unified_pass" -e "DROP USER IF EXISTS '$dbuser'@'localhost';"
+        run_task "Memuat ulang hak akses" mysql -u root -p"$mariadb_unified_pass" -e "FLUSH PRIVILEGES;"
+    fi
+    log "success" "Semua data untuk domain '$domain' berhasil dihapus."
 }
 
 show_menu() {
     clear
-    echo -e "${C_BOLD}${C_MAGENTA}==========================================================${C_RESET}"
-    echo -e "${C_BOLD}${C_MAGENTA}          🚀 SCRIPT MANAJEMEN WORDPRESS SUPER 🚀          ${C_RESET}"
-    echo -e "${C_BOLD}${C_MAGENTA}==========================================================${C_RESET}"
-    echo -e "  OS: ${C_CYAN}${PRETTY_NAME}${C_RESET} | PHP: ${C_CYAN}${PHP_VERSION}${C_RESET}"
+    echo -e "${C_BOLD}${C_MAGENTA}"
+    echo "=========================================================="
+    echo "           🚀 SCRIPT MANAJEMEN WORDPRESS 🚀               "
+    echo "=========================================================="
+    echo -e "${C_RESET}"
+    if [[ "$PHP_VERSION" == "Tidak Didukung" ]]; then
+        echo -e "  OS: ${C_CYAN}${PRETTY_NAME}${C_RESET} | PHP: ${C_RED}${PHP_VERSION}${C_RESET}"
+    else
+        echo -e "  OS: ${C_CYAN}${PRETTY_NAME}${C_RESET} | PHP: ${C_CYAN}${PHP_VERSION}${C_RESET}"
+    fi
     echo ""
-    echo "  1. Setup Awal Server & Fail2Ban"
-    echo "  2. Tambah Website WordPress"
-    echo "  3. Lihat Daftar Website"
-    echo "  4. Perbarui Semua Situs"
-    echo "  5. Hapus Website"
-    echo "  6. Keluar"
+    echo -e "  ${C_GREEN}1. Setup Awal Server & Fail2Ban ⚙️${C_RESET}"
+    echo -e "  ${C_CYAN}2. Tambah Website WordPress Baru ➕${C_RESET}"
+    echo -e "  ${C_YELLOW}3. Lihat Daftar Website Terpasang 📜${C_RESET}"
+    echo -e "  ${C_MAGENTA}4. Perbarui WordPress, Plugin & Tema 🔄${C_RESET}"
+    echo -e "  ${C_RED}5. Hapus Website 🗑️${C_RESET}"
+    echo -e "  ${C_BLUE}6. Keluar 🚪${C_RESET}"
+    echo ""
 }
 
 main() {
@@ -478,9 +542,10 @@ main() {
             4) update_semua_situs ;;
             5) delete_website ;;
             6) log "info" "Terima kasih! 👋"; exit 0 ;;
-            *) sleep 1 ;;
+            *) log "warn" "Pilihan tidak valid."; sleep 1 ;;
         esac
-        read -n 1 -s -r -p "Tekan ENTER..."
+        echo
+        read -n 1 -s -r -p "$(echo -e "\n${C_CYAN}Tekan ENTER untuk kembali ke menu...${C_RESET}")"
     done
 }
 
