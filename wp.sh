@@ -35,7 +35,7 @@ run_task() {
     shift
     local command_args=("$@")
     
-    printf "${C_CYAN}    -> %s... ${C_RESET}" "$description"
+    printf "${C_CYAN}   -> %s... ${C_RESET}" "$description"
     
     output=$("${command_args[@]}" 2>&1)
     local exit_code=$?
@@ -145,13 +145,14 @@ EOF
 }
 
 setup_fail2ban_logic() {
-    log "info" "Mengonfigurasi Fail2Ban..."
+    log "info" "Mengonfigurasi Fail2Ban untuk SSH dan WordPress..."
     cat <<EOF > /etc/fail2ban/filter.d/wordpress.conf
 [Definition]
 failregex = ^<HOST>.* "POST /wp-login.php
             ^<HOST>.* "POST /xmlrpc.php
 ignoreregex =
 EOF
+
     cat <<EOF > /etc/fail2ban/jail.local
 [DEFAULT]
 bantime  = 24h
@@ -176,6 +177,7 @@ EOF
 setup_server() {
     log "header" "MEMULAI SETUP SERVER"
     log "info" "Menggunakan OS terdeteksi: $PRETTY_NAME"
+    detect_os_php
     if [[ "$PHP_VERSION" == "Tidak Didukung" ]]; then
         log "error" "Versi Ubuntu '$OS_CODENAME' tidak didukung secara otomatis oleh skrip ini."
     fi
@@ -228,10 +230,8 @@ setup_server() {
 generate_db_credentials() {
     local domain=$1
     local suffix=$2
-    local domain_part
-    domain_part=$(echo "$domain" | tr '.' '_' | cut -c1-10)
-    local hash_part
-    hash_part=$(echo -n "$domain" | md5sum | cut -c1-5)
+    local domain_part=$(echo "$domain" | tr '.' '_' | cut -c1-10)
+    local hash_part=$(echo -n "$domain" | md5sum | cut -c1-5)
     echo "${domain_part}_${hash_part}${suffix}"
 }
 
@@ -268,12 +268,12 @@ add_website() {
     local ssl_key_path="$ssl_dir/$domain.key"
     
     log "info" "Selanjutnya, editor teks 'nano' akan terbuka untuk Anda."
-    echo -e "${C_YELLOW}    -> Tempelkan konten sertifikat (.crt), lalu simpan (Ctrl+X, Y, Enter).${C_RESET}"
-    read -p "    Tekan ENTER untuk melanjutkan..."
+    echo -e "${C_YELLOW}   -> Tempelkan konten sertifikat (.crt), lalu simpan (Ctrl+X, Y, Enter).${C_RESET}"
+    read -p "   Tekan ENTER untuk melanjutkan..."
     nano "$ssl_cert_path"
     
-    echo -e "${C_YELLOW}    -> Tempelkan konten Kunci Privat (.key), lalu simpan.${C_RESET}"
-    read -p "    Tekan ENTER untuk melanjutkan..."
+    echo -e "${C_YELLOW}   -> Tempelkan konten Kunci Privat (.key), lalu simpan.${C_RESET}"
+    read -p "   Tekan ENTER untuk melanjutkan..."
     nano "$ssl_key_path"
 
     if [ ! -s "$ssl_cert_path" ] || [ ! -s "$ssl_key_path" ]; then log "error" "File SSL tidak boleh kosong."; fi
@@ -404,135 +404,63 @@ list_websites() {
 update_semua_situs() {
     log "header" "MEMPERBARUI WORDPRESS CORE, PLUGIN & TEMA"
     local sites_dir="/etc/nginx/sites-enabled"
-    local sites_found=0
-
-    if [ ! -d "$sites_dir" ] || [ -z "$(ls -A "$sites_dir")" ]; then
-        log "warn" "Tidak ada website yang ditemukan untuk diperbarui."
-        return
-    fi
-
     for nginx_conf in "$sites_dir"/*; do
         local domain=$(basename "$nginx_conf")
-        if [[ "$domain" == "default" ]; then
-            continue
+        [[ "$domain" == "default" ]] && continue
+        local web_root=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
+        if [ -f "$web_root/wp-config.php" ]; then
+            echo -e "\n🔎 Memproses situs: $domain"
+            run_task "Update Core" sudo -u www-data wp core update --path="$web_root"
+            run_task "Update Plugins" sudo -u www-data wp plugin update --all --path="$web_root"
         fi
-        
-        if [ ! -f "$nginx_conf" ]; then
-            continue
-        fi
-
-        sites_found=$((sites_found + 1))
-        echo -e "\n${C_BOLD}${C_CYAN}🔎 Memproses situs: $domain${C_RESET}"
-
-        local web_root
-        web_root=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
-        
-        if [ -z "$web_root" ] || [ ! -d "$web_root" ]; then
-            log "warn" "Direktori root untuk '$domain' tidak ditemukan atau tidak valid. Melewati."
-            continue
-        fi
-        
-        if [ ! -f "$web_root/wp-config.php" ]; then
-            log "warn" "Instalasi WordPress tidak ditemukan di '$web_root'. Melewati."
-            continue
-        fi
-
-        log "info" "Path terdeteksi: $web_root"
-        run_task "Memperbarui inti WordPress (Core) untuk '$domain'" sudo -u www-data wp core update --path="$web_root"
-        run_task "Memperbarui semua plugin untuk '$domain'" sudo -u www-data wp plugin update --all --path="$web_root"
-        run_task "Memperbarui semua tema untuk '$domain'" sudo -u www-data wp theme update --all --path="$web_root"
     done
-
-    if [ "$sites_found" -eq 0 ]; then
-        log "warn" "Tidak ada website WordPress yang dikonfigurasi yang ditemukan."
-    else
-        log "success" "Proses pembaruan untuk semua situs telah selesai."
-    fi
 }
 
 delete_website() {
     log "header" "HAPUS WEBSITE"
     local domain
     prompt_input "Nama domain yang akan dihapus" domain
-    if [ -z "$domain" ]; then
-        log "warn" "Nama domain kosong. Operasi dibatalkan."
-        return
-    fi
-
     local nginx_conf="/etc/nginx/sites-enabled/$domain"
     local ssl_dir="/etc/nginx/ssl/$domain"
     local log_dir="/var/log/nginx/$domain"
     local web_root_parent
 
     if [ -f "$nginx_conf" ]; then
-        local public_html_path
-        public_html_path=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
-        if [ -n "$public_html_path" ]; then
-            web_root_parent=$(dirname "$public_html_path")
-        fi
+        local public_html_path=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
+        [ -n "$public_html_path" ] && web_root_parent=$(dirname "$public_html_path")
     fi
 
-    if [ -z "$web_root_parent" ]; then
-        log "warn" "Path root tidak terdeteksi. Menggunakan path standar /var/www/$domain."
-        web_root_parent="/var/www/$domain"
-    fi
+    [ -z "$web_root_parent" ] && web_root_parent="/var/www/$domain"
     
     local dbname=$(generate_db_credentials "$domain" "_wp")
     local dbuser=$(generate_db_credentials "$domain" "_usr")
 
-    log "warn" "Anda akan menghapus SEMUA data untuk domain '$domain' secara permanen."
-    log "warn" "Direktori ${web_root_parent} dan database ${dbname} juga akan dihapus."
-    
-    local confirmation
-    read -p "$(echo -e ${C_BOLD}${C_YELLOW}'❓ Apakah Anda benar-benar yakin? Tindakan ini tidak dapat dibatalkan. (y/N): '${C_RESET})" confirmation
+    read -p "❓ Hapus semua data domain $domain? (y/N): " confirmation
+    if [[ ! "$confirmation" =~ ^[Yy]$ ]]; then return; fi
 
-    if [[ ! "$confirmation" =~ ^[Yy]$ ]]; then
-        log "info" "Operasi penghapusan dibatalkan."
-        return
-    fi
-
-    log "info" "Memulai proses penghapusan untuk '$domain'..."
-    if [ -f "$nginx_conf" ]; then
-        run_task "Menghapus konfigurasi Nginx dari sites-enabled" rm "$nginx_conf"
-    fi
-    run_task "Me-reload Nginx" systemctl reload nginx
-
-    if [ -d "$web_root_parent" ]; then
-        run_task "Menghapus direktori web '$web_root_parent'" rm -rf "$web_root_parent"
-    fi
-    
-    if [ -d "$ssl_dir" ]; then run_task "Menghapus direktori SSL" rm -rf "$ssl_dir"; fi
-    if [ -d "$log_dir" ]; then run_task "Menghapus direktori log" rm -rf "$log_dir"; fi
+    run_task "Hapus Nginx conf" rm "$nginx_conf"
+    run_task "Hapus Web Root" rm -rf "$web_root_parent"
+    run_task "Hapus SSL & Log" rm -rf "$ssl_dir" "$log_dir"
+    run_task "Reload Nginx" systemctl reload nginx
 
     load_or_create_password
-    if mysql -u root -p"$mariadb_unified_pass" -e "USE $dbname;" &>/dev/null; then
-        run_task "Menghapus database '$dbname'" mysql -u root -p"$mariadb_unified_pass" -e "DROP DATABASE IF EXISTS $dbname;"
-        run_task "Menghapus user database '$dbuser'" mysql -u root -p"$mariadb_unified_pass" -e "DROP USER IF EXISTS '$dbuser'@'localhost';"
-        run_task "Memuat ulang hak akses" mysql -u root -p"$mariadb_unified_pass" -e "FLUSH PRIVILEGES;"
-    fi
-    log "success" "Semua data untuk domain '$domain' telah berhasil dihapus."
+    run_task "Hapus DB" mysql -u root -p"$mariadb_unified_pass" -e "DROP DATABASE IF EXISTS $dbname; DROP USER IF EXISTS '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
+    log "success" "Selesai dihapus."
 }
 
 show_menu() {
     clear
-    echo -e "${C_BOLD}${C_MAGENTA}"
-    echo "=========================================================="
-    echo "          🚀 SCRIPT MANAJEMEN WORDPRESS SUPER 🚀          "
-    echo "=========================================================="
-    echo -e "${C_RESET}"
-    if [[ "$PHP_VERSION" == "Tidak Didukung" ]]; then
-        echo -e "  OS: ${C_CYAN}${PRETTY_NAME}${C_RESET} | PHP: ${C_RED}${PHP_VERSION}${C_RESET}"
-    else
-        echo -e "  OS: ${C_CYAN}${PRETTY_NAME}${C_RESET} | PHP: ${C_CYAN}${PHP_VERSION}${C_RESET}"
-    fi
+    echo -e "${C_BOLD}${C_MAGENTA}==========================================================${C_RESET}"
+    echo -e "${C_BOLD}${C_MAGENTA}           🚀 SCRIPT MANAJEMEN WORDPRESS SUPER 🚀          ${C_RESET}"
+    echo -e "${C_BOLD}${C_MAGENTA}==========================================================${C_RESET}"
+    echo -e "  OS: ${C_CYAN}${PRETTY_NAME}${C_RESET} | PHP: ${C_CYAN}${PHP_VERSION}${C_RESET}"
     echo ""
-    echo -e "  ${C_GREEN}1. Setup Awal Server (OS & PHP Otomatis) ⚙️${C_RESET}"
-    echo -e "  ${C_CYAN}2. Tambah Website WordPress Baru ➕${C_RESET}"
-    echo -e "  ${C_YELLOW}3. Lihat Daftar Website Terpasang 📜${C_RESET}"
-    echo -e "  ${C_MAGENTA}4. Perbarui WordPress, Plugin & Tema 🔄${C_RESET}"
-    echo -e "  ${C_RED}5. Hapus Website 🗑️${C_RESET}"
-    echo -e "  ${C_BLUE}6. Keluar 🚪${C_RESET}"
-    echo ""
+    echo "  1. Setup Awal Server & Fail2Ban"
+    echo "  2. Tambah Website WordPress"
+    echo "  3. Lihat Daftar Website"
+    echo "  4. Perbarui Semua Situs"
+    echo "  5. Hapus Website"
+    echo "  6. Keluar"
 }
 
 main() {
@@ -546,10 +474,9 @@ main() {
             4) update_semua_situs ;;
             5) delete_website ;;
             6) log "info" "Terima kasih! 👋"; exit 0 ;;
-            *) log "warn" "Pilihan tidak valid."; sleep 2 ;;
+            *) sleep 1 ;;
         esac
-        echo
-        read -n 1 -s -r -p "$(echo -e "\n${C_CYAN}Tekan tombol apapun untuk kembali ke menu...${C_RESET}")"
+        read -n 1 -s -r -p "Tekan ENTER..."
     done
 }
 
