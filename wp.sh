@@ -116,8 +116,9 @@ load_or_create_password() {
     fi
 }
 
+# --- LOGIC BARU: CLOUDFLARE REAL IP ---
 setup_cloudflare_real_ip() {
-    log "info" "Konfigurasi Real IP Cloudflare untuk Nginx..."
+    log "info" "Mengonfigurasi Real IP Cloudflare untuk Nginx..."
     cat <<EOF > /etc/nginx/conf.d/cloudflare.conf
 set_real_ip_from 173.245.48.0/20;
 set_real_ip_from 103.21.244.0/22;
@@ -144,8 +145,9 @@ real_ip_header CF-Connecting-IP;
 EOF
 }
 
+# --- LOGIC BARU: FAIL2BAN ---
 setup_fail2ban_logic() {
-    log "info" "Konfigurasi Fail2Ban (Filter & Jail)..."
+    log "info" "Mengonfigurasi Fail2Ban untuk SSH dan WordPress..."
     cat <<EOF > /etc/fail2ban/filter.d/wordpress.conf
 [Definition]
 failregex = ^<HOST>.* "POST /wp-login.php
@@ -177,6 +179,7 @@ EOF
 setup_server() {
     log "header" "MEMULAI SETUP SERVER"
     log "info" "Menggunakan OS terdeteksi: $PRETTY_NAME"
+    detect_os_php
     if [[ "$PHP_VERSION" == "Tidak Didukung" ]]; then
         log "error" "Versi Ubuntu '$OS_CODENAME' tidak didukung secara otomatis oleh skrip ini."
     fi
@@ -205,8 +208,7 @@ setup_server() {
     run_task "Menginstal paket yang dibutuhkan" apt-get install -y "${packages_needed[@]}" || log "error"
 
     if ! command -v wp &> /dev/null; then
-        run_task "Menginstal WP-CLI" wget -qO /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-        run_task "Mengatur izin WP-CLI" chmod +x /usr/local/bin/wp
+        run_task "Menginstal WP-CLI" wget -qO /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x /usr/local/bin/wp || log "error"
     fi
 
     run_task "Memulai layanan MariaDB" systemctl enable --now mariadb.service || log "error"
@@ -222,8 +224,7 @@ setup_server() {
     setup_cloudflare_real_ip
     setup_fail2ban_logic
     
-    run_task "Restart Nginx" systemctl restart nginx
-    run_task "Restart Fail2Ban" systemctl restart fail2ban
+    run_task "Restarting Services" systemctl restart nginx fail2ban
     
     log "success" "Setup server selesai! Versi PHP aktif: $PHP_VERSION."
 }
@@ -231,14 +232,16 @@ setup_server() {
 generate_db_credentials() {
     local domain=$1
     local suffix=$2
-    local domain_part=$(echo "$domain" | tr '.' '_' | cut -c1-10)
-    local hash_part=$(echo -n "$domain" | md5sum | cut -c1-5)
+    local domain_part
+    domain_part=$(echo "$domain" | tr '.' '_' | cut -c1-10)
+    local hash_part
+    hash_part=$(echo -n "$domain" | md5sum | cut -c1-5)
     echo "${domain_part}_${hash_part}${suffix}"
 }
 
 add_website() {
     if [[ "$PHP_VERSION" == "Tidak Didukung" ]]; then
-        log "error" "Versi Ubuntu '$OS_CODENAME' tidak didukung."
+        log "error" "Tidak dapat menambah website karena versi Ubuntu '$OS_CODENAME' tidak didukung."
     fi
 
     log "header" "TAMBAH WEBSITE WORDPRESS BARU"
@@ -252,31 +255,37 @@ add_website() {
     dbuser=$(generate_db_credentials "$domain" "_usr")
 
     if [ -f "/etc/nginx/sites-enabled/$domain" ]; then
-        log "error" "Konflik: File konfigurasi Nginx untuk $domain sudah ada."
+        log "error" "Konflik: File konfigurasi Nginx untuk $domain sudah ada di sites-enabled."
     fi
 
-    run_task "Membuat Database & User" mysql -u root -p"$mariadb_unified_pass" -e "CREATE DATABASE $dbname; CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$mariadb_unified_pass'; GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
-    run_task "Membuat direktori root" mkdir -p "$web_root"
-    run_task "Mengatur izin direktori" chown -R www-data:www-data "/var/www/$domain"
-    run_task "Mengunduh WordPress" sudo -u www-data wp core download --path="$web_root"
-    run_task "Membuat wp-config.php" sudo -u www-data wp config create --path="$web_root" --dbname="$dbname" --dbuser="$dbuser" --dbpass="$mariadb_unified_pass"
+    run_task "Membuat database '$dbname' dan user '$dbuser'" mysql -u root -p"$mariadb_unified_pass" -e "CREATE DATABASE $dbname; CREATE USER '$dbuser'@'localhost' IDENTIFIED BY '$mariadb_unified_pass'; GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost'; FLUSH PRIVILEGES;" || log "error"
+    
+    run_task "Membuat direktori root dan mengatur izin" mkdir -p "$web_root" && chown -R www-data:www-data "/var/www/$domain" || log "error"
+    
+    run_task "Mengunduh file inti WordPress" sudo -u www-data wp core download --path="$web_root" || log "error"
+    run_task "Membuat file wp-config.php" sudo -u www-data wp config create --path="$web_root" --dbname="$dbname" --dbuser="$dbuser" --dbpass="$mariadb_unified_pass" || log "error"
 
     log "header" "KONFIGURASI SSL (HTTPS)"
     local ssl_dir="/etc/nginx/ssl/$domain"
-    run_task "Membuat direktori SSL" mkdir -p "$ssl_dir"
-    local cert="$ssl_dir/$domain.crt"
-    local key="$ssl_dir/$domain.key"
+    run_task "Membuat direktori SSL" mkdir -p "$ssl_dir" || log "error"
+    local ssl_cert_path="$ssl_dir/$domain.crt"
+    local ssl_key_path="$ssl_dir/$domain.key"
     
-    log "info" "Editor nano akan terbuka untuk CRT dan KEY."
-    read -p "Tekan ENTER untuk CRT..." && nano "$cert"
-    read -p "Tekan ENTER untuk KEY..." && nano "$key"
+    log "info" "Selanjutnya, editor teks 'nano' akan terbuka untuk Anda."
+    echo -e "${C_YELLOW}   -> Tempelkan konten sertifikat (.crt), lalu simpan (Ctrl+X, Y, Enter).${C_RESET}"
+    read -p "   Tekan ENTER untuk melanjutkan..."
+    nano "$ssl_cert_path"
+    
+    echo -e "${C_YELLOW}   -> Tempelkan konten Kunci Privat (.key), lalu simpan.${C_RESET}"
+    read -p "   Tekan ENTER untuk melanjutkan..."
+    nano "$ssl_key_path"
 
-    if [ ! -s "$cert" ] || [ ! -s "$key" ]; then log "error" "File SSL kosong."; fi
+    if [ ! -s "$ssl_cert_path" ] || [ ! -s "$ssl_key_path" ]; then log "error" "File SSL tidak boleh kosong."; fi
 
     local log_dir="/var/log/nginx/$domain"
-    run_task "Membuat direktori log" mkdir -p "$log_dir"
+    run_task "Membuat direktori log Nginx" mkdir -p "$log_dir" || log "error"
 
-    log "info" "Membuat file konfigurasi Nginx..."
+    log "info" "Membuat file konfigurasi Nginx untuk '$domain' langsung di sites-enabled..."
     tee "/etc/nginx/sites-enabled/$domain" > /dev/null <<EOF
 server {
     listen 80;
@@ -288,12 +297,15 @@ server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
     server_name $domain www.$domain;
+
     root $web_root;
     index index.php;
+
     access_log $log_dir/access.log;
     error_log $log_dir/error.log;
-    ssl_certificate $cert;
-    ssl_certificate_key $key;
+
+    ssl_certificate $ssl_cert_path;
+    ssl_certificate_key $ssl_key_path;
 
     rewrite ^/sitemap\.xml$ /index.php?sitemap=1 last;
     rewrite ^/sitemap_index\.xml$ /index.php?sitemap=1 last;
@@ -306,56 +318,75 @@ server {
     add_header Referrer-Policy "no-referrer-when-downgrade" always;
 
     client_max_body_size 100M;
+
     gzip on;
-    gzip_types application/json text/css application/javascript image/svg+xml;
+    gzip_vary on;
+    gzip_min_length 1000;
+    gzip_comp_level 5;
+    gzip_types application/json text/css application/x-javascript application/javascript image/svg+xml;
+    gzip_proxied any;
 
     location / {
         try_files \$uri \$uri/ /index.php\$is_args\$args;
     }
 
-    location = /xmlrpc.php { deny all; access_log off; }
     location ~* /wp-config\.php { deny all; }
-    location ~* /(?:uploads|files)/.*\.php$ { deny all; }
+    location = /xmlrpc.php { deny all; access_log off; }
 
-    location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
-       access_log off;
-       log_not_found off;
-       expires 360d;
+    location ~* /(?:uploads|files)/.*\.php$ {
+        deny all;
     }
 
-    location ~ /\.ht { deny all; }
+    location ~* \.(jpg|jpeg|gif|png|webp|svg|woff|woff2|ttf|css|js|ico|xml)$ {
+       access_log         off;
+       log_not_found      off;
+       expires            360d;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
 
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
+        fastcgi_buffers 1024 4k;
+        fastcgi_buffer_size 128k;
     }
 }
 EOF
 
-    run_task "Menguji Nginx" nginx -t
-    run_task "Reload Nginx" systemctl reload nginx
-    run_task "Reload Fail2Ban" systemctl reload fail2ban
+    if ! run_task "Menguji konfigurasi Nginx" nginx -t; then
+        log "error" "Konfigurasi Nginx tidak valid."
+    fi
+    run_task "Me-reload layanan Nginx" systemctl reload nginx || log "error"
+    systemctl reload fail2ban
 
     log "header" "INFORMASI ADMIN WORDPRESS"
+    log "info" "Silakan masukkan detail untuk akun admin WordPress."
     local site_title admin_user admin_password admin_email
+    
     prompt_input "Judul Website" site_title
     prompt_input "Username Admin" admin_user
     prompt_input "Password Admin" admin_password -s
     prompt_input "Email Admin" admin_email
     
-    run_task "Instalasi WordPress" sudo -u www-data wp core install --path="$web_root" --url="https://$domain" --title="$site_title" --admin_user="$admin_user" --admin_password="$admin_password" --admin_email="$admin_email"
-    run_task "Hapus plugin default" sudo -u www-data wp plugin delete hello akismet --path="$web_root"
-    run_task "Install plugin standar" sudo -u www-data wp plugin install wp-file-manager disable-comments-rb floating-ads-bottom post-views-counter seo-by-rank-math --activate --path="$web_root"
+    run_task "Menjalankan instalasi WordPress" sudo -u www-data wp core install --path="$web_root" --url="https://$domain" --title="$site_title" --admin_user="$admin_user" --admin_password="$admin_password" --admin_email="$admin_email" || log "error"
+    
+    run_task "Menghapus plugin bawaan" sudo -u www-data wp plugin delete hello akismet --path="$web_root"
 
-    log "info" "Mengelola Paket Plugin Kustom..."
+    log "info" "Menginstal plugin-plugin standar..."
+    run_task "Menginstal plugin" sudo -u www-data wp plugin install wp-file-manager disable-comments-rb floating-ads-bottom post-views-counter seo-by-rank-math --activate --path="$web_root" || log "error"
+
+    log "info" "Mengunduh dan mengekstrak paket plugin kustom..."
     local plugin_url="https://github.com/sofyanmurtadlo10/wp/blob/main/plugin.zip?raw=true"
     local plugin_zip="/tmp/plugin_paket.zip"
     local plugin_dir="$web_root/wp-content/plugins/"
     
-    run_task "Unduh plugin zip" wget -qO "$plugin_zip" "$plugin_url"
-    run_task "Ekstrak plugin zip" sudo -u www-data unzip -o "$plugin_zip" -d "$plugin_dir"
-    run_task "Aktivasi semua plugin" sudo -u www-data wp plugin activate --all --path="$web_root"
-    run_task "Bersihkan file zip" rm "$plugin_zip"
+    run_task "Mengunduh plugin zip" wget -qO "$plugin_zip" "$plugin_url" || log "error" "Gagal mengunduh paket plugin."
+    run_task "Mengekstrak plugin" sudo -u www-data unzip -o "$plugin_zip" -d "$plugin_dir" || log "error"
+    run_task "Aktivasi semua plugin" sudo -u www-data wp plugin activate --all --path="$web_root" || log "error"
+    run_task "Membersihkan file zip" rm "$plugin_zip" || log "warn" "Gagal menghapus file zip sementara."
 
     log "success" "Situs https://$domain selesai!"
 }
@@ -365,42 +396,60 @@ list_websites() {
     local sites_dir="/etc/nginx/sites-enabled"
     if [ -d "$sites_dir" ] && [ -n "$(ls -A "$sites_dir")" ]; then
         for site in "$sites_dir"/*; do
-            [[ "$(basename "$site")" != "default" ]] && echo -e "    🌐 ${C_GREEN}$(basename "$site")${C_RESET}"
+            if [[ "$(basename "$site")" != "default" ]]; then
+                echo -e "    🌐 ${C_GREEN}$(basename "$site")${C_RESET}"
+            fi
         done
     else
-        log "warn" "Tidak ada website."
+        log "warn" "Tidak ada website yang ditemukan."
     fi
 }
 
 update_semua_situs() {
     log "header" "MEMPERBARUI WORDPRESS CORE, PLUGIN & TEMA"
-    for conf in /etc/nginx/sites-enabled/*; do
-        domain=$(basename "$conf")
+    local sites_dir="/etc/nginx/sites-enabled"
+    for nginx_conf in "$sites_dir"/*; do
+        local domain=$(basename "$nginx_conf")
         [[ "$domain" == "default" ]] && continue
-        web_root=$(grep -oP '^\s*root\s+\K[^;]+' "$conf" | head -n 1)
+        local web_root=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
         if [ -f "$web_root/wp-config.php" ]; then
-            echo -e "\n🔎 Memproses: $domain"
+            echo -e "\n🔎 Memproses situs: $domain"
             run_task "Update Core" sudo -u www-data wp core update --path="$web_root"
             run_task "Update Plugins" sudo -u www-data wp plugin update --all --path="$web_root"
         fi
     done
-    log "success" "Pembaruan selesai."
 }
 
 delete_website() {
     log "header" "HAPUS WEBSITE"
-    prompt_input "Domain yang dihapus" domain
-    local conf="/etc/nginx/sites-enabled/$domain"
-    if [ ! -f "$conf" ]; then log "error" "Domain tidak ada."; fi
-    
-    read -p "Hapus semua data $domain? (y/N): " conf_del
-    [[ ! "$conf_del" =~ ^[Yy]$ ]] && return
+    local domain
+    prompt_input "Nama domain yang akan dihapus" domain
+    local nginx_conf="/etc/nginx/sites-enabled/$domain"
+    local ssl_dir="/etc/nginx/ssl/$domain"
+    local log_dir="/var/log/nginx/$domain"
+    local web_root_parent
 
-    run_task "Hapus Nginx conf" rm "$conf"
-    run_task "Hapus Web Root" rm -rf "/var/www/$domain"
-    run_task "Hapus SSL & Log" rm -rf "/etc/nginx/ssl/$domain" "/var/log/nginx/$domain"
+    if [ -f "$nginx_conf" ]; then
+        local public_html_path=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
+        [ -n "$public_html_path" ] && web_root_parent=$(dirname "$public_html_path")
+    fi
+
+    [ -z "$web_root_parent" ] && web_root_parent="/var/www/$domain"
+    
+    local dbname=$(generate_db_credentials "$domain" "_wp")
+    local dbuser=$(generate_db_credentials "$domain" "_usr")
+
+    read -p "❓ Hapus semua data domain $domain? (y/N): " confirmation
+    if [[ ! "$confirmation" =~ ^[Yy]$ ]]; then return; fi
+
+    run_task "Hapus Nginx conf" rm "$nginx_conf"
+    run_task "Hapus Web Root" rm -rf "$web_root_parent"
+    run_task "Hapus SSL & Log" rm -rf "$ssl_dir" "$log_dir"
     run_task "Reload Nginx" systemctl reload nginx
-    log "success" "Berhasil dihapus."
+
+    load_or_create_password
+    run_task "Hapus DB" mysql -u root -p"$mariadb_unified_pass" -e "DROP DATABASE IF EXISTS $dbname; DROP USER IF EXISTS '$dbuser'@'localhost'; FLUSH PRIVILEGES;"
+    log "success" "Selesai dihapus."
 }
 
 show_menu() {
@@ -421,14 +470,14 @@ show_menu() {
 main() {
     while true; do
         show_menu
-        read -p "Opsi [1-6]: " choice
+        read -p "Pilih opsi [1-6]: " choice
         case $choice in
             1) setup_server ;;
             2) add_website ;;
             3) list_websites ;;
             4) update_semua_situs ;;
             5) delete_website ;;
-            6) log "info" "Keluar..."; exit 0 ;;
+            6) log "info" "Terima kasih! 👋"; exit 0 ;;
             *) sleep 1 ;;
         esac
         read -n 1 -s -r -p "Tekan ENTER..."
