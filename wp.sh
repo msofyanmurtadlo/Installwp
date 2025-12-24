@@ -151,42 +151,43 @@ logpath = /var/log/nginx/*/access.log
           /var/log/nginx/access.log
 maxretry = 3
 EOF
-    systemctl stop fail2ban
+    run_task "Menghentikan Fail2Ban sementara" systemctl stop fail2ban
     rm -f /var/run/fail2ban/fail2ban.sock
-    systemctl start fail2ban
-    systemctl enable fail2ban
+    run_task "Memulai ulang Fail2Ban" systemctl start fail2ban
+    run_task "Mengaktifkan Fail2Ban saat boot" systemctl enable fail2ban
 }
 
 setup_server() {
     log "header" "MEMULAI SETUP SERVER"
     detect_os_php
-    run_task "Update paket" apt-get update -y
-    run_task "Install dependensi" apt-get install -y software-properties-common curl wget unzip fail2ban ufw mariadb-server nginx bc
+    run_task "Update daftar paket" apt-get update -y
+    run_task "Install dependensi sistem" apt-get install -y software-properties-common curl wget unzip fail2ban ufw mariadb-server nginx bc
     
     if ! grep -q "^deb .*ondrej/php" /etc/apt/sources.list /etc/apt/sources.list.d/*; then
-        add-apt-repository -y ppa:ondrej/php
-        apt-get update -y
+        run_task "Menambahkan PPA PHP" add-apt-repository -y ppa:ondrej/php
+        run_task "Update paket (setelah PPA)" apt-get update -y
     fi
 
     local php_packages=("php${PHP_VERSION}-fpm" "php${PHP_VERSION}-mysql" "php${PHP_VERSION}-xml" "php${PHP_VERSION}-curl" "php${PHP_VERSION}-gd" "php${PHP_VERSION}-mbstring" "php${PHP_VERSION}-zip" "php${PHP_VERSION}-intl" "php${PHP_VERSION}-bcmath")
     run_task "Install PHP $PHP_VERSION" apt-get install -y "${php_packages[@]}"
     
     if ! command -v wp &> /dev/null; then
-        wget -qO /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-        chmod +x /usr/local/bin/wp
+        run_task "Download WP-CLI" wget -qO /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        run_task "Set izin WP-CLI" chmod +x /usr/local/bin/wp
     fi
 
     load_or_create_password
-    mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_unified_pass'; FLUSH PRIVILEGES;" 2>/dev/null
+    run_task "Setting keamanan MariaDB" mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$mariadb_unified_pass'; FLUSH PRIVILEGES;" 2>/dev/null
 
-    ufw allow 'OpenSSH'
-    ufw allow 'Nginx Full'
-    ufw --force enable
+    run_task "Firewall: Izinkan SSH" ufw allow 'OpenSSH'
+    run_task "Firewall: Izinkan Nginx" ufw allow 'Nginx Full'
+    run_task "Firewall: Aktifkan" ufw --force enable
     
     setup_cloudflare_real_ip
     setup_fail2ban
     
-    nginx -t && systemctl restart nginx
+    run_task "Verifikasi Nginx" nginx -t
+    run_task "Restart Nginx" systemctl restart nginx
     log "success" "Setup server selesai!"
 }
 
@@ -199,21 +200,22 @@ add_website() {
     local dbuser="${domain//./_}_usr"
     local log_dir="/var/log/nginx/$domain"
 
-    mysql -u root -p"$mariadb_unified_pass" -e "CREATE DATABASE $dbname; GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost' IDENTIFIED BY '$mariadb_unified_pass'; FLUSH PRIVILEGES;"
+    run_task "Membuat database & hak akses" mysql -u root -p"$mariadb_unified_pass" -e "CREATE DATABASE $dbname; GRANT ALL PRIVILEGES ON $dbname.* TO '$dbuser'@'localhost' IDENTIFIED BY '$mariadb_unified_pass'; FLUSH PRIVILEGES;"
 
-    mkdir -p "$web_root" "$log_dir"
-    chown -R www-data:www-data "/var/www/$domain"
+    run_task "Membuat direktori website" mkdir -p "$web_root" "$log_dir"
+    run_task "Mengatur hak akses folder" chown -R www-data:www-data "/var/www/$domain"
     
-    sudo -u www-data wp core download --path="$web_root"
-    sudo -u www-data wp config create --path="$web_root" --dbname="$dbname" --dbuser="$dbuser" --dbpass="$mariadb_unified_pass"
+    run_task "Download WordPress" sudo -u www-data wp core download --path="$web_root"
+    run_task "Membuat wp-config" sudo -u www-data wp config create --path="$web_root" --dbname="$dbname" --dbuser="$dbuser" --dbpass="$mariadb_unified_pass"
 
     log "info" "Konfigurasi SSL"
     local cert="/etc/nginx/ssl/$domain/$domain.crt"
     local key="/etc/nginx/ssl/$domain/$domain.key"
-    mkdir -p "$(dirname "$cert")"
+    run_task "Membuat folder SSL" mkdir -p "$(dirname "$cert")"
     prompt_input "ENTER untuk isi CRT" junk && nano "$cert"
     prompt_input "ENTER untuk isi KEY" junk && nano "$key"
 
+    log "info" "Membuat konfigurasi Virtual Host Nginx..."
     tee "/etc/nginx/sites-enabled/$domain" > /dev/null <<EOF
 server {
     listen 80;
@@ -264,7 +266,9 @@ server {
     }
 }
 EOF
-    nginx -t && systemctl reload nginx && systemctl reload fail2ban
+    run_task "Uji konfigurasi Nginx" nginx -t
+    run_task "Reload Nginx" systemctl reload nginx
+    run_task "Reload Fail2Ban" systemctl reload fail2ban
     
     log "header" "INSTALL WORDPRESS"
     local site_title admin_user admin_password admin_email
@@ -273,19 +277,19 @@ EOF
     prompt_input "Password Admin" admin_password -s
     prompt_input "Email Admin" admin_email
     
-    sudo -u www-data wp core install --path="$web_root" --url="https://$domain" --title="$site_title" --admin_user="$admin_user" --admin_password="$admin_password" --admin_email="$admin_email"
+    run_task "Jalankan WP Install" sudo -u www-data wp core install --path="$web_root" --url="https://$domain" --title="$site_title" --admin_user="$admin_user" --admin_password="$admin_password" --admin_email="$admin_email"
     
-    log "info" "Mengelola Plugin Kustom..."
+    log "info" "Mengelola Plugin..."
     local plugin_url="https://github.com/sofyanmurtadlo10/wp/raw/main/plugin.zip"
     local plugin_zip="/tmp/plugin.zip"
     local plugin_dir="$web_root/wp-content/plugins"
     
-    run_task "Download paket plugin" wget -qO "$plugin_zip" "$plugin_url"
-    run_task "Ekstrak plugin" unzip -o "$plugin_zip" -d "$plugin_dir"
-    rm -f "$plugin_zip"
+    run_task "Download paket plugin GitHub" wget -qO "$plugin_zip" "$plugin_url"
+    run_task "Ekstrak plugin zip" unzip -o "$plugin_zip" -d "$plugin_dir"
+    run_task "Hapus file zip sementara" rm -f "$plugin_zip"
     
-    run_task "Aktivasi plugin standar" sudo -u www-data wp plugin install wp-file-manager disable-comments-rb floating-ads-bottom post-views-counter seo-by-rank-math --activate --path="$web_root"
-    run_task "Aktivasi semua plugin kustom" sudo -u www-data wp plugin activate --all --path="$web_root"
+    run_task "Install plugin standar" sudo -u www-data wp plugin install wp-file-manager disable-comments-rb floating-ads-bottom post-views-counter seo-by-rank-math --activate --path="$web_root"
+    run_task "Aktivasi semua plugin terinstal" sudo -u www-data wp plugin activate --all --path="$web_root"
     
     log "success" "$domain siap!"
 }
@@ -302,8 +306,8 @@ update_semua_situs() {
         [[ "$domain" == "default" ]] && continue
         web_root=$(grep -oP '^\s*root\s+\K[^;]+' "$nginx_conf" | head -n 1)
         if [ -f "$web_root/wp-config.php" ]; then
-            sudo -u www-data wp core update --path="$web_root"
-            sudo -u www-data wp plugin update --all --path="$web_root"
+            run_task "Update Core WordPress ($domain)" sudo -u www-data wp core update --path="$web_root"
+            run_task "Update Plugin ($domain)" sudo -u www-data wp plugin update --all --path="$web_root"
         fi
     done
 }
@@ -311,12 +315,12 @@ update_semua_situs() {
 delete_website() {
     log "header" "HAPUS WEBSITE"
     prompt_input "Domain" domain
-    rm "/etc/nginx/sites-enabled/$domain"
-    rm -rf "/var/www/$domain"
-    rm -rf "/etc/nginx/ssl/$domain"
-    rm -rf "/var/log/nginx/$domain"
-    systemctl reload nginx
-    log "success" "$domain dihapus."
+    run_task "Menghapus Virtual Host Nginx" rm "/etc/nginx/sites-enabled/$domain"
+    run_task "Menghapus file website" rm -rf "/var/www/$domain"
+    run_task "Menghapus sertifikat SSL" rm -rf "/etc/nginx/ssl/$domain"
+    run_task "Menghapus folder log" rm -rf "/var/log/nginx/$domain"
+    run_task "Reload Nginx" systemctl reload nginx
+    log "success" "$domain berhasil dihapus."
 }
 
 show_menu() {
